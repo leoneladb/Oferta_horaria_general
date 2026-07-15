@@ -90,6 +90,48 @@
           <span class="label" id="countLabel">0</span>
         </div>
         <div class="sidebar-body">
+
+          <!-- FILTROS: Instituto / Carrera -->
+          <div class="filters-block">
+            <div class="filter-group">
+              <label class="filter-label" for="instituteSearch">Instituto</label>
+              <input
+                id="instituteSearch"
+                class="search-input filter-search"
+                type="search"
+                placeholder="Buscar instituto..."
+              />
+              <div class="filter-select-wrap">
+                <select id="instituteSelect" class="filter-select">
+                  <option value="">Todos los institutos</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="filter-group">
+              <label class="filter-label" for="carrerSearch">Carrera</label>
+              <input
+                id="carrerSearch"
+                class="search-input filter-search"
+                type="search"
+                placeholder="Buscar carrera..."
+              />
+              <div class="filter-select-wrap">
+                <select id="carrerSelect" class="filter-select">
+                  <option value="">Todas las carreras</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              class="btn-modal cancel filter-clear-btn"
+              id="filtersClearBtn"
+              type="button"
+            >
+              Limpiar filtros
+            </button>
+          </div>
+
           <input
             id="searchInput"
             class="search-input"
@@ -179,31 +221,79 @@
     <script>
       const BASE_URL = "";
 
-      // IDs reales de todas las carreras a cargar, agrupadas por instituto.
-      // Instituto 8
-      const CARRER_IDS_INST_8 = [18, 110, 123, 16, 17, 18, 84, 20, 111, 26, 19, 24, 25];
-      // Instituto 7
-      const CARRER_IDS_INST_7 = [13, 11, 10, 21, 28, 12, 30, 73, 11, 27, 112, 11, 113, 15, 11, 116];
-      // Instituto 9
-      const CARRER_IDS_INST_9 = [8, 29, 7, 9, 23, 121, 114, 122];
-      // Instituto 10
-      const CARRER_IDS_INST_10 = [76, 77, 75, 78, 109, 108];
-      // Instituto 11
-      const CARRER_IDS_INST_11 = [115];
+      /* ---------------- CATÁLOGO DE INSTITUTOS Y CARRERAS ---------------- */
+      // Estructura declarada explícitamente a partir de los datos provistos.
+      // Cada carrera queda asociada a su instituto para poder filtrar por ambos.
+      const INSTITUTES = [
+        { id: 8, name: "Instituto de Ciencias de la Salud" },
+        { id: 9, name: "Instituto de Ciencias Sociales y Administración" },
+        { id: 10, name: "Instituto de Estudios Iniciales, Humanidades y Educación" },
+        { id: 7, name: "Instituto de Ingeniería y Agronomía" },
+        { id: 11, name: "Extracurriculares" },
+      ];
 
-      // Unificamos y quitamos duplicados (algunos IDs se repiten en las listas provistas)
-      const ALL_CARRER_IDS = Array.from(
-        new Set([
-          ...CARRER_IDS_INST_8,
-          ...CARRER_IDS_INST_7,
-          ...CARRER_IDS_INST_9,
-          ...CARRER_IDS_INST_10,
-          ...CARRER_IDS_INST_11,
-        ]),
-      );
+      const CARRERS = [
+        // Instituto 8 - Ciencias de la Salud
+        { id: 18, instituteId: 8, name: "Bioquímica" },
+        { id: 110, instituteId: 8, name: "Ciclo Básico de Salud" },
+        { id: 123, instituteId: 8, name: "Diplomatura Superior en Kinesiología Deportiva y Readaptación Funcional" },
+        { id: 16, instituteId: 8, name: "Lic. en Enfermería" },
+        { id: 17, instituteId: 8, name: "Lic. en Kinesiología y Fisiatría" },
+        { id: 84, instituteId: 8, name: "Lic. en Obstetricia" },
+        { id: 20, instituteId: 8, name: "Lic. en Organización y Asistencia de Quirófanos" },
+        { id: 111, instituteId: 8, name: "Materias Comunes ICS" },
+        { id: 26, instituteId: 8, name: "Medicina" },
+        { id: 19, instituteId: 8, name: "T. U. en Emergencias Sanitarias y Desastres" },
+        { id: 24, instituteId: 8, name: "T. U. en Farmacia Hospitalaria" },
+        { id: 25, instituteId: 8, name: "T. U. en Información Clínica y Gestión de Pacientes" },
+
+        // Instituto 9 - Ciencias Sociales y Administración
+        { id: 8, instituteId: 9, name: "Lic. en Administración" },
+        { id: 29, instituteId: 9, name: "Lic. en Economía" },
+        { id: 7, instituteId: 9, name: "Lic. en Gestión Ambiental" },
+        { id: 9, instituteId: 9, name: "Lic. en Relaciones del Trabajo" },
+        { id: 23, instituteId: 9, name: "Lic. en Trabajo Social" },
+        { id: 121, instituteId: 9, name: "Maestría en Gestión y Administración Pública" },
+        { id: 114, instituteId: 9, name: "Materias Comunes ICSyA" },
+        { id: 122, instituteId: 9, name: "Tecnicatura en Gestión Universitaria" },
+
+        // Instituto 10 - Estudios Iniciales, Humanidades y Educación
+        { id: 76, instituteId: 10, name: "Ciclo de Complementación Curricular (CCC) de Lic. en Didáctica de la Matemática" },
+        { id: 77, instituteId: 10, name: "Ciclo de Complementación Curricular (CCC) de Lic. en Enseñanza de las Ciencias Naturales" },
+        { id: 75, instituteId: 10, name: "Ciclo de Complementación Curricular (CCC) de Lic. en Gestión Educativa" },
+        { id: 78, instituteId: 10, name: "Ciclo de Complementación Curricular (CCC) de Lic. en Letras" },
+        { id: 109, instituteId: 10, name: "Materias Comunes CCC - IEI" },
+        { id: 108, instituteId: 10, name: "Materias del Ciclo Inicial - IEI" },
+
+        // Instituto 7 - Ingeniería y Agronomía
+        { id: 13, instituteId: 7, name: "Bioingeniería" },
+        { id: 11, instituteId: 7, name: "Ing. Electromecánica" },
+        { id: 10, instituteId: 7, name: "Ing. en Informática" },
+        { id: 21, instituteId: 7, name: "Ing. en Petróleo" },
+        { id: 28, instituteId: 7, name: "Ing. en Transporte" },
+        { id: 12, instituteId: 7, name: "Ing. Industrial" },
+        { id: 30, instituteId: 7, name: "Lic. en Administración Agraria" },
+        { id: 73, instituteId: 7, name: "Lic. en Administración Agraria MD" },
+        { id: 27, instituteId: 7, name: "Lic. en Ciencias Agrarias" },
+        { id: 112, instituteId: 7, name: "Materias Básicas de Ingeniería" },
+        { id: 113, instituteId: 7, name: "Materias Compartidas IIyA" },
+        { id: 15, instituteId: 7, name: "T. U. en Emprendimientos Agropecuarios" },
+        { id: 116, instituteId: 7, name: "T. U. en Producción Vegetal Intensiva" },
+
+        // Instituto 11 - Extracurriculares
+        { id: 115, instituteId: 11, name: "Extracurriculares" },
+      ];
+
+      // IDs reales de todas las carreras a cargar (se derivan del catálogo de arriba,
+      // deduplicados, para no tener que mantener listas sueltas por separado)
+      const ALL_CARRER_IDS = Array.from(new Set(CARRERS.map((c) => c.id)));
 
       let allSubjects = [];
       let selectedSubject = null;
+
+      // Filtros activos
+      let filterInstituteId = ""; // "" = todos
+      let filterCarrerId = ""; // "" = todos
 
       /* ---------------- ICONOS (SVG inline, sin emojis) ---------------- */
       const ICONS = {
@@ -312,6 +402,133 @@
 
       updateSoundToggleUI();
 
+      /* ---------------- FILTROS: Instituto / Carrera ---------------- */
+
+      function populateInstituteSelect(filterText = "") {
+        const select = document.getElementById("instituteSelect");
+        const q = normalizeText(filterText);
+        const current = filterInstituteId;
+
+        select.innerHTML = `<option value="">Todos los institutos</option>`;
+        INSTITUTES.filter((inst) => !q || normalizeText(inst.name).includes(q))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach((inst) => {
+            const opt = document.createElement("option");
+            opt.value = String(inst.id);
+            opt.textContent = inst.name;
+            select.appendChild(opt);
+          });
+
+        // Si el instituto actualmente elegido sigue en la lista filtrada, lo mantenemos seleccionado
+        if (
+          current &&
+          Array.from(select.options).some((o) => o.value === String(current))
+        ) {
+          select.value = String(current);
+        } else {
+          select.value = "";
+        }
+      }
+
+      function populateCarrerSelect(filterText = "") {
+        const select = document.getElementById("carrerSelect");
+        const q = normalizeText(filterText);
+        const current = filterCarrerId;
+
+        let pool = CARRERS;
+        if (filterInstituteId) {
+          pool = pool.filter(
+            (c) => String(c.instituteId) === String(filterInstituteId),
+          );
+        }
+        if (q) {
+          pool = pool.filter((c) => normalizeText(c.name).includes(q));
+        }
+
+        select.innerHTML = `<option value="">Todas las carreras</option>`;
+        pool
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach((c) => {
+            const opt = document.createElement("option");
+            // Usamos un valor compuesto porque el mismo carrerId puede repetirse
+            // en distintos institutos (ej: id 11 aparece dos veces en los datos provistos)
+            opt.value = `${c.instituteId}::${c.id}`;
+            opt.textContent = c.name;
+            select.appendChild(opt);
+          });
+
+        if (
+          current &&
+          Array.from(select.options).some((o) => o.value === current)
+        ) {
+          select.value = current;
+        } else {
+          select.value = "";
+          filterCarrerId = "";
+        }
+      }
+
+      function initFilters() {
+        populateInstituteSelect();
+        populateCarrerSelect();
+
+        document
+          .getElementById("instituteSearch")
+          .addEventListener("input", (e) => {
+            populateInstituteSelect(e.target.value);
+          });
+
+        document
+          .getElementById("carrerSearch")
+          .addEventListener("input", (e) => {
+            populateCarrerSelect(e.target.value);
+          });
+
+        document
+          .getElementById("instituteSelect")
+          .addEventListener("change", (e) => {
+            filterInstituteId = e.target.value || "";
+            // Al cambiar de instituto, la carrera elegida puede ya no pertenecerle
+            const carrerSearchVal = document.getElementById(
+              "carrerSearch",
+            ).value;
+            populateCarrerSelect(carrerSearchVal);
+            filterCarrerId = document.getElementById("carrerSelect").value || "";
+            sndTick();
+            renderList();
+          });
+
+        document
+          .getElementById("carrerSelect")
+          .addEventListener("change", (e) => {
+            filterCarrerId = e.target.value || "";
+            // Si se eligió una carrera, autocompletamos el instituto correspondiente
+            if (filterCarrerId) {
+              const [instId] = filterCarrerId.split("::");
+              if (instId && instId !== filterInstituteId) {
+                filterInstituteId = instId;
+                document.getElementById("instituteSelect").value = instId;
+              }
+            }
+            sndTick();
+            renderList();
+          });
+
+        document
+          .getElementById("filtersClearBtn")
+          .addEventListener("click", () => {
+            filterInstituteId = "";
+            filterCarrerId = "";
+            document.getElementById("instituteSearch").value = "";
+            document.getElementById("carrerSearch").value = "";
+            populateInstituteSelect();
+            populateCarrerSelect();
+            sndTick();
+            renderList();
+          });
+      }
+
       /* ---------------- CARGA INICIAL: todas las carreras en paralelo ---------------- */
       async function loadAllSubjects() {
         const dot = document.getElementById("statusDot");
@@ -320,25 +537,33 @@
 
         try {
           const responses = await Promise.all(
-            ALL_CARRER_IDS.map((id) =>
-              fetch(`${BASE_URL}/api/materias/${id}`)
+            CARRERS.map((c) =>
+              fetch(`${BASE_URL}/api/materias/${c.id}`)
                 .then((r) => r.json())
-                .catch(() => []),
+                .then((data) => ({ carrer: c, data }))
+                .catch(() => ({ carrer: c, data: [] })),
             ),
           );
 
           const merged = [];
           const seen = new Set();
-          responses.forEach((data) => {
+          responses.forEach(({ carrer, data }) => {
             const items = Array.isArray(data) ? data : data.items || [];
             items.forEach((s) => {
+              // Anotamos cada materia con el instituto/carrera bajo la cual la cargamos,
+              // para poder filtrar sin depender de que el backend lo informe.
+              const enriched = {
+                ...s,
+                _instituteId: carrer.instituteId,
+                _carrerId: carrer.id,
+              };
               const key =
                 s.subjectId !== undefined && s.subjectId !== null
-                  ? `id:${s.subjectId}`
-                  : `nc:${normalizeText(s.code)}|${normalizeText(s.name)}`;
+                  ? `id:${s.subjectId}|c:${carrer.instituteId}::${carrer.id}`
+                  : `nc:${normalizeText(s.code)}|${normalizeText(s.name)}|c:${carrer.instituteId}::${carrer.id}`;
               if (!seen.has(key)) {
                 seen.add(key);
-                merged.push(s);
+                merged.push(enriched);
               }
             });
           });
@@ -358,7 +583,7 @@
         }
       }
 
-      /* ---------------- RENDER LISTA (con búsqueda) ---------------- */
+      /* ---------------- RENDER LISTA (con búsqueda + filtros) ---------------- */
       function normalizeText(s) {
         return String(s || "")
           .normalize("NFD")
@@ -368,8 +593,24 @@
 
       function getVisibleSubjects() {
         const q = normalizeText(document.getElementById("searchInput").value);
-        if (!q) return allSubjects;
-        return allSubjects.filter(
+        let items = allSubjects;
+
+        if (filterInstituteId) {
+          items = items.filter(
+            (s) => String(s._instituteId) === String(filterInstituteId),
+          );
+        }
+        if (filterCarrerId) {
+          const [instId, carrerId] = filterCarrerId.split("::");
+          items = items.filter(
+            (s) =>
+              String(s._instituteId) === String(instId) &&
+              String(s._carrerId) === String(carrerId),
+          );
+        }
+
+        if (!q) return items;
+        return items.filter(
           (s) =>
             normalizeText(s.name).includes(q) ||
             normalizeText(s.code).includes(q),
@@ -439,9 +680,10 @@
         const instituteId =
           subject.instituteId ||
           (subject.institute && subject.institute.id) ||
+          subject._instituteId ||
           7;
         const careerId =
-          (subject.carrer && subject.carrer.id) || null;
+          (subject.carrer && subject.carrer.id) || subject._carrerId || null;
 
         const payload = [
           {
@@ -1759,6 +2001,7 @@
         if (duration > 0) setTimeout(close, duration);
       }
 
+      initFilters();
       loadAllSubjects();
     </script>
 
