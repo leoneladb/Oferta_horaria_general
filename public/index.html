@@ -91,36 +91,52 @@
         </div>
         <div class="sidebar-body">
 
-          <!-- FILTROS: Instituto / Carrera -->
+          <!-- FILTROS: Instituto / Carrera (combos autocompletar) -->
           <div class="filters-block">
-            <div class="filter-group">
+            <div class="filter-group combo-group" id="instituteCombo">
               <label class="filter-label" for="instituteSearch">Instituto</label>
-              <input
-                id="instituteSearch"
-                class="search-input filter-search"
-                type="search"
-                placeholder="Buscar instituto..."
-              />
-              <div class="filter-select-wrap">
-                <select id="instituteSelect" class="filter-select">
-                  <option value="">Todos los institutos</option>
-                </select>
+              <div class="combo-input-wrap">
+                <input
+                  id="instituteSearch"
+                  class="search-input filter-search"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Todos los institutos"
+                />
+                <button
+                  class="combo-clear-x"
+                  id="instituteComboClear"
+                  type="button"
+                  title="Quitar filtro"
+                  style="display: none"
+                >
+                  ×
+                </button>
               </div>
+              <div class="combo-dropdown" id="instituteDropdown"></div>
             </div>
 
-            <div class="filter-group">
+            <div class="filter-group combo-group" id="carrerCombo">
               <label class="filter-label" for="carrerSearch">Carrera</label>
-              <input
-                id="carrerSearch"
-                class="search-input filter-search"
-                type="search"
-                placeholder="Buscar carrera..."
-              />
-              <div class="filter-select-wrap">
-                <select id="carrerSelect" class="filter-select">
-                  <option value="">Todas las carreras</option>
-                </select>
+              <div class="combo-input-wrap">
+                <input
+                  id="carrerSearch"
+                  class="search-input filter-search"
+                  type="text"
+                  autocomplete="off"
+                  placeholder="Todas las carreras"
+                />
+                <button
+                  class="combo-clear-x"
+                  id="carrerComboClear"
+                  type="button"
+                  title="Quitar filtro"
+                  style="display: none"
+                >
+                  ×
+                </button>
               </div>
+              <div class="combo-dropdown" id="carrerDropdown"></div>
             </div>
 
             <button
@@ -404,126 +420,208 @@
 
       /* ---------------- FILTROS: Instituto / Carrera ---------------- */
 
-      function populateInstituteSelect(filterText = "") {
-        const select = document.getElementById("instituteSelect");
-        const q = normalizeText(filterText);
-        const current = filterInstituteId;
+      // ---- Combo autocompletar genérico ----
+      // Un input de texto que, mientras se escribe, abre un dropdown con las
+      // opciones que matchean (sin tener que tocar nada manualmente). Al
+      // elegir una opción con click/Enter, se selecciona y el dropdown se
+      // cierra. Si el input queda vacío, no hay filtro aplicado.
 
-        select.innerHTML = `<option value="">Todos los institutos</option>`;
-        INSTITUTES.filter((inst) => !q || normalizeText(inst.name).includes(q))
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .forEach((inst) => {
-            const opt = document.createElement("option");
-            opt.value = String(inst.id);
-            opt.textContent = inst.name;
-            select.appendChild(opt);
-          });
-
-        // Si el instituto actualmente elegido sigue en la lista filtrada, lo mantenemos seleccionado
-        if (
-          current &&
-          Array.from(select.options).some((o) => o.value === String(current))
-        ) {
-          select.value = String(current);
-        } else {
-          select.value = "";
+      function renderComboDropdown(dropdownEl, items, onPick) {
+        if (items.length === 0) {
+          dropdownEl.innerHTML = `<div class="combo-empty">Sin resultados</div>`;
+          dropdownEl.classList.add("open");
+          return;
         }
+        dropdownEl.innerHTML = items
+          .map(
+            (it, i) =>
+              `<div class="combo-option" data-idx="${i}">${escapeHtml(it.name)}</div>`,
+          )
+          .join("");
+        dropdownEl.classList.add("open");
+        dropdownEl.querySelectorAll(".combo-option").forEach((el, i) => {
+          el.addEventListener("mousedown", (e) => {
+            // mousedown (no click) para que dispare antes del blur del input
+            e.preventDefault();
+            onPick(items[i]);
+          });
+        });
       }
 
-      function populateCarrerSelect(filterText = "") {
-        const select = document.getElementById("carrerSelect");
-        const q = normalizeText(filterText);
-        const current = filterCarrerId;
+      function closeComboDropdown(dropdownEl) {
+        dropdownEl.classList.remove("open");
+      }
 
+      function getInstituteOptions(q) {
+        const nq = normalizeText(q);
+        return INSTITUTES.filter(
+          (inst) => !nq || normalizeText(inst.name).includes(nq),
+        ).sort((a, b) => a.name.localeCompare(b.name));
+      }
+
+      function getCarrerOptions(q) {
+        const nq = normalizeText(q);
         let pool = CARRERS;
         if (filterInstituteId) {
           pool = pool.filter(
             (c) => String(c.instituteId) === String(filterInstituteId),
           );
         }
-        if (q) {
-          pool = pool.filter((c) => normalizeText(c.name).includes(q));
+        if (nq) {
+          pool = pool.filter((c) => normalizeText(c.name).includes(nq));
         }
-
-        select.innerHTML = `<option value="">Todas las carreras</option>`;
-        pool
+        return pool
           .slice()
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .forEach((c) => {
-            const opt = document.createElement("option");
-            // Usamos un valor compuesto porque el mismo carrerId puede repetirse
-            // en distintos institutos (ej: id 11 aparece dos veces en los datos provistos)
-            opt.value = `${c.instituteId}::${c.id}`;
-            opt.textContent = c.name;
-            select.appendChild(opt);
-          });
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }
 
-        if (
-          current &&
-          Array.from(select.options).some((o) => o.value === current)
-        ) {
-          select.value = current;
-        } else {
-          select.value = "";
-          filterCarrerId = "";
-        }
+      function setInstituteFilter(inst) {
+        filterInstituteId = inst ? String(inst.id) : "";
+        document.getElementById("instituteSearch").value = inst
+          ? inst.name
+          : "";
+        document.getElementById("instituteComboClear").style.display = inst
+          ? "flex"
+          : "none";
+      }
+
+      function setCarrerFilter(carrer) {
+        filterCarrerId = carrer ? `${carrer.instituteId}::${carrer.id}` : "";
+        document.getElementById("carrerSearch").value = carrer
+          ? carrer.name
+          : "";
+        document.getElementById("carrerComboClear").style.display = carrer
+          ? "flex"
+          : "none";
       }
 
       function initFilters() {
-        populateInstituteSelect();
-        populateCarrerSelect();
+        const instInput = document.getElementById("instituteSearch");
+        const instDropdown = document.getElementById("instituteDropdown");
+        const instClearBtn = document.getElementById("instituteComboClear");
 
-        document
-          .getElementById("instituteSearch")
-          .addEventListener("input", (e) => {
-            populateInstituteSelect(e.target.value);
-          });
+        const carrerInput = document.getElementById("carrerSearch");
+        const carrerDropdown = document.getElementById("carrerDropdown");
+        const carrerClearBtn = document.getElementById("carrerComboClear");
 
-        document
-          .getElementById("carrerSearch")
-          .addEventListener("input", (e) => {
-            populateCarrerSelect(e.target.value);
-          });
-
-        document
-          .getElementById("instituteSelect")
-          .addEventListener("change", (e) => {
-            filterInstituteId = e.target.value || "";
+        // ---- Instituto ----
+        instInput.addEventListener("input", () => {
+          const q = instInput.value;
+          if (!q) {
+            filterInstituteId = "";
+            instClearBtn.style.display = "none";
+          }
+          renderComboDropdown(instDropdown, getInstituteOptions(q), (inst) => {
+            setInstituteFilter(inst);
+            closeComboDropdown(instDropdown);
             // Al cambiar de instituto, la carrera elegida puede ya no pertenecerle
-            const carrerSearchVal = document.getElementById(
-              "carrerSearch",
-            ).value;
-            populateCarrerSelect(carrerSearchVal);
-            filterCarrerId = document.getElementById("carrerSelect").value || "";
-            sndTick();
-            renderList();
-          });
-
-        document
-          .getElementById("carrerSelect")
-          .addEventListener("change", (e) => {
-            filterCarrerId = e.target.value || "";
-            // Si se eligió una carrera, autocompletamos el instituto correspondiente
             if (filterCarrerId) {
               const [instId] = filterCarrerId.split("::");
-              if (instId && instId !== filterInstituteId) {
-                filterInstituteId = instId;
-                document.getElementById("instituteSelect").value = instId;
-              }
+              if (instId !== filterInstituteId) setCarrerFilter(null);
             }
             sndTick();
             renderList();
           });
+        });
+        instInput.addEventListener("focus", () => {
+          renderComboDropdown(
+            instDropdown,
+            getInstituteOptions(instInput.value),
+            (inst) => {
+              setInstituteFilter(inst);
+              closeComboDropdown(instDropdown);
+              if (filterCarrerId) {
+                const [instId] = filterCarrerId.split("::");
+                if (instId !== filterInstituteId) setCarrerFilter(null);
+              }
+              sndTick();
+              renderList();
+            },
+          );
+        });
+        instInput.addEventListener("blur", () => {
+          setTimeout(() => {
+            closeComboDropdown(instDropdown);
+            // Si lo que quedó escrito no coincide con el instituto activo, restauramos
+            const active = INSTITUTES.find(
+              (i) => String(i.id) === String(filterInstituteId),
+            );
+            instInput.value = active ? active.name : "";
+            if (!filterInstituteId) instClearBtn.style.display = "none";
+          }, 120);
+        });
+        instClearBtn.addEventListener("click", () => {
+          setInstituteFilter(null);
+          if (filterCarrerId) setCarrerFilter(null);
+          instInput.focus();
+          sndTick();
+          renderList();
+        });
+
+        // ---- Carrera ----
+        carrerInput.addEventListener("input", () => {
+          const q = carrerInput.value;
+          if (!q) {
+            filterCarrerId = "";
+            carrerClearBtn.style.display = "none";
+          }
+          renderComboDropdown(carrerDropdown, getCarrerOptions(q), (c) => {
+            setCarrerFilter(c);
+            closeComboDropdown(carrerDropdown);
+            // Autocompletamos el instituto correspondiente a la carrera elegida
+            if (String(c.instituteId) !== String(filterInstituteId)) {
+              const inst = INSTITUTES.find(
+                (i) => String(i.id) === String(c.instituteId),
+              );
+              if (inst) setInstituteFilter(inst);
+            }
+            sndTick();
+            renderList();
+          });
+        });
+        carrerInput.addEventListener("focus", () => {
+          renderComboDropdown(
+            carrerDropdown,
+            getCarrerOptions(carrerInput.value),
+            (c) => {
+              setCarrerFilter(c);
+              closeComboDropdown(carrerDropdown);
+              if (String(c.instituteId) !== String(filterInstituteId)) {
+                const inst = INSTITUTES.find(
+                  (i) => String(i.id) === String(c.instituteId),
+                );
+                if (inst) setInstituteFilter(inst);
+              }
+              sndTick();
+              renderList();
+            },
+          );
+        });
+        carrerInput.addEventListener("blur", () => {
+          setTimeout(() => {
+            closeComboDropdown(carrerDropdown);
+            const [instId, carrerId] = (filterCarrerId || "").split("::");
+            const active = CARRERS.find(
+              (c) =>
+                String(c.instituteId) === String(instId) &&
+                String(c.id) === String(carrerId),
+            );
+            carrerInput.value = active ? active.name : "";
+            if (!filterCarrerId) carrerClearBtn.style.display = "none";
+          }, 120);
+        });
+        carrerClearBtn.addEventListener("click", () => {
+          setCarrerFilter(null);
+          carrerInput.focus();
+          sndTick();
+          renderList();
+        });
 
         document
           .getElementById("filtersClearBtn")
           .addEventListener("click", () => {
-            filterInstituteId = "";
-            filterCarrerId = "";
-            document.getElementById("instituteSearch").value = "";
-            document.getElementById("carrerSearch").value = "";
-            populateInstituteSelect();
-            populateCarrerSelect();
+            setInstituteFilter(null);
+            setCarrerFilter(null);
             sndTick();
             renderList();
           });

@@ -413,6 +413,81 @@ header {
   background: rgba(255,77,109,0.08);
 }
 
+/* ---------- COMBO AUTOCOMPLETAR (Instituto / Carrera) ---------- */
+.combo-group {
+  position: relative;
+}
+.combo-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.combo-input-wrap .filter-search {
+  padding-right: 34px;
+}
+.combo-clear-x {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: rgba(255,77,109,0.12);
+  color: var(--red);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+}
+.combo-clear-x:hover {
+  background: rgba(255,77,109,0.25);
+}
+
+.combo-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #060a13;
+  border: 1px solid var(--violet);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(124,77,255,0.1);
+  padding: 4px;
+}
+.combo-dropdown.open { display: block; }
+.combo-dropdown::-webkit-scrollbar { width: 7px; }
+.combo-dropdown::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+.combo-option {
+  padding: 10px 12px;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .1s;
+}
+.combo-option:hover {
+  background: rgba(124,77,255,0.16);
+  color: #fff;
+}
+.combo-empty {
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-align: center;
+}
+
 .materia-list {
   margin-top: 17px;
   max-height: 780px;
@@ -1366,6 +1441,13 @@ footer {
     width: 100%;
     text-align: center;
     padding: 11px;
+  }
+  .combo-dropdown {
+    max-height: 200px;
+  }
+  .combo-option {
+    padding: 12px 12px;
+    font-size: 0.92rem;
   }
 
   .materia-list { max-height: 360px; }
