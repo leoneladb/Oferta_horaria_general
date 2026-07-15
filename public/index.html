@@ -184,10 +184,19 @@
       const CARRER_IDS_INST_8 = [18, 110, 123, 16, 17, 18, 84, 20, 111, 26, 19, 24, 25];
       // Instituto 7
       const CARRER_IDS_INST_7 = [13, 11, 10, 21, 28, 12, 30, 73, 11, 27, 112, 11, 113, 15, 11, 116];
+      // Instituto 9
+      const CARRER_IDS_INST_9 = [8, 29, 7, 9, 23, 121, 114, 122];
+      // Instituto 10
+      const CARRER_IDS_INST_10 = [76, 77, 75, 78, 109, 108];
 
       // Unificamos y quitamos duplicados (algunos IDs se repiten en las listas provistas)
       const ALL_CARRER_IDS = Array.from(
-        new Set([...CARRER_IDS_INST_8, ...CARRER_IDS_INST_7]),
+        new Set([
+          ...CARRER_IDS_INST_8,
+          ...CARRER_IDS_INST_7,
+          ...CARRER_IDS_INST_9,
+          ...CARRER_IDS_INST_10,
+        ]),
       );
 
       let allSubjects = [];
