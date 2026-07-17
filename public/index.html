@@ -783,6 +783,10 @@
         const careerId =
           (subject.carrer && subject.carrer.id) || subject._carrerId || null;
 
+        // academicPeriodId: valor "de relleno". El backend (/api/horarios)
+        // lo detecta solo contra la página oficial y lo pisa antes de
+        // reenviar, así que este número ya no hace falta actualizarlo
+        // a mano nunca más.
         const payload = [
           {
             instituteId: instituteId,
