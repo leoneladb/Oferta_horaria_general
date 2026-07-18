@@ -12,6 +12,16 @@
     />
     <link rel="stylesheet" href="styles.css" />
     <style>
+      /* Contador de usuarios conectados en tiempo real (Firebase presence) */
+      #onlinePill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .online-dot {
+        background: #22c55e;
+        box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
+      }
       /* Botón flotante "volver arriba" dentro de la lista de materias */
       .scroll-top-btn {
         position: fixed;
@@ -99,6 +109,10 @@
         <div class="status-pill">
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">Conectando...</span>
+        </div>
+        <div class="status-pill" id="onlinePill" title="Usuarios conectados ahora">
+          <span class="status-dot online-dot"></span>
+          <span id="onlineCount">–</span>
         </div>
       </div>
     </header>
@@ -2330,7 +2344,10 @@
         ref,
         push,
         set,
+        remove,
         onValue,
+        onDisconnect,
+        serverTimestamp,
         off,
       } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-database.js";
 
@@ -2348,6 +2365,41 @@
 
       const fbApp = initializeApp(firebaseConfig);
       const db = getDatabase(fbApp);
+
+      // ==================== PRESENCIA / USUARIOS CONECTADOS ====================
+      // Estrategia estándar de Firebase Realtime Database para contar clientes
+      // conectados en vivo, sin polling: cada pestaña crea un nodo propio bajo
+      // /presence/<id>. Al conectar, registramos onDisconnect().remove() ANTES
+      // de escribir nuestro propio nodo: si el server detecta la desconexión
+      // (cierre de pestaña, pérdida de red, crash del navegador, etc.) borra
+      // el nodo automáticamente del lado del servidor, sin que el cliente
+      // tenga que avisar nada. Escuchamos /presence completo con onValue y
+      // mostramos Object.keys(snapshot.val()).length -> eso ya es el conteo
+      // en tiempo real, actualizado apenas se conecta o desconecta cualquiera.
+      const presenceId =
+        Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const myPresenceRef = ref(db, "presence/" + presenceId);
+      const presenceRootRef = ref(db, "presence");
+      const connectedInfoRef = ref(db, ".info/connected");
+
+      onValue(connectedInfoRef, (snap) => {
+        if (snap.val() === true) {
+          // Si se corta la conexión (o se cierra la pestaña), Firebase borra
+          // este nodo del lado del servidor automáticamente.
+          onDisconnect(myPresenceRef)
+            .remove()
+            .then(() => {
+              set(myPresenceRef, { connectedAt: serverTimestamp() });
+            });
+        }
+      });
+
+      const onlineCountEl = document.getElementById("onlineCount");
+      onValue(presenceRootRef, (snapshot) => {
+        const val = snapshot.val();
+        const count = val ? Object.keys(val).length : 0;
+        if (onlineCountEl) onlineCountEl.textContent = String(count);
+      });
 
       const BASE_URL = "";
 
