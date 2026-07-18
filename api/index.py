@@ -578,7 +578,7 @@ async def get_horarios(request: Request):
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
-                "https://oferta-academica.espacios.unaj.edu.ar/XXX",
+                "",
                 headers={
                     "Accept": "text/x-component",
                     "Content-Type": "text/plain;charset=UTF-8",
