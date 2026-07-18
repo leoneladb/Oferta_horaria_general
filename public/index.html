@@ -899,7 +899,14 @@
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
-          const items = Array.isArray(data) ? data : data.items || [];
+          const usandoBackup = !Array.isArray(data) && data && data.fromCache === true;
+          const itemsCrudos = Array.isArray(data) ? data : data.items || [];
+          // Si vino del respaldo, marcamos cada comisión para que
+          // isComisionAssigned() muestre siempre la última aula guardada,
+          // sin importar lo que diga "assignament".
+          const items = usandoBackup
+            ? itemsCrudos.map((com) => ({ ...com, __fromBackup: true }))
+            : itemsCrudos;
           renderCoordinatorBanner(findCoordinator(items));
           renderComisiones(items);
           sndSuccess();
@@ -1065,7 +1072,13 @@
       // (assignament.id === 3 o descripción "Asignada"/"Asignado").
       // Si está en id 1, 2 o la descripción dice "No Asignada" / "Pendiente...",
       // hay que ocultar el aula/edificio mostrando el mensaje genérico.
+      //
+      // EXCEPCIÓN: si la comisión viene del respaldo (la página oficial
+      // estaba caída y se usó el JSON guardado), no nos importa lo que
+      // diga "assignament" -- mostramos directamente la última aula que
+      // se llegó a guardar, sea cual sea su estado de asignación.
       function isComisionAssigned(com) {
+        if (com && com.__fromBackup) return true;
         const a = (com && (com.assignament || com.asignamiento)) || null;
         if (!a) return true; // sin info de estado, no ocultamos nada
         const id = a.id;

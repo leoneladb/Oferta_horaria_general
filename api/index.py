@@ -627,6 +627,14 @@ async def get_horarios(request: Request):
                         "buildingName": item.get("building"),
                         "headquarterName": item.get("headquarter"),
                         "observations": item.get("observations"),
+                        # Este fallback (parseo manual de tabla HTML) no
+                        # tiene forma de saber si el aula está confirmada o
+                        # no. En vez de dejar el campo ausente (lo que el
+                        # frontend interpreta como "sí está asignada" y
+                        # muestra el aula), declaramos explícitamente que
+                        # no sabemos, para que se muestre "Aula sin
+                        # asignar" en lugar de arriesgar un dato incorrecto.
+                        "assignament": {"id": None, "description": "No asignada"},
                         "raw": item,
                     }
                     for item in parsed_from_html
