@@ -9,7 +9,6 @@ Endpoints:
   GET  /api/test
 """
 
-import asyncio
 import hashlib
 import json
 import os
@@ -35,91 +34,100 @@ app.add_middleware(
 
 DEFAULT_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ==================== RESPALDO EN UN ÚNICO JSON LOCAL ====================
+# ==================== RESPALDO EN UPSTASH REDIS (REST API) ====================
 # Idea: cada vez que conseguimos datos reales (materias u horarios) desde
-# la página oficial, los guardamos acá. Si en un pedido futuro la página
-# oficial falla (timeout, caída, cambio de formato, etc.), en vez de
-# devolver un array vacío usamos lo último que tengamos guardado para esa
-# misma consulta, avisando al frontend con "fromCache": true.
+# la página oficial, los guardamos en Upstash Redis. Si en un pedido futuro
+# la página oficial falla (timeout, caída, cambio de formato, etc.), en vez
+# de devolver un array vacío usamos lo último que tengamos guardado para
+# esa misma consulta, avisando al frontend con "fromCache": true.
 #
-# Todo vive en UN solo archivo JSON (BACKUP_FILE), con esta forma:
-# {
-#   "materias": { "<carrerId>": {"data": [...], "updatedAt": "..."} },
-#   "horarios": { "<hash>":     {"data": [...], "updatedAt": "..."} },
-#   "period":   { "value": 11, "updatedAt": "..." }
-# }
-BACKUP_FILE = os.environ.get(
-    "BACKUP_FILE",
-    os.path.join(os.path.dirname(
-        os.path.abspath(__file__)), "backup_data.json"),
-)
+# Por qué Redis y no un archivo local: en Vercel las funciones corren en un
+# filesystem de solo lectura (salvo /tmp, que es efímero y se borra en cada
+# cold start / redeploy). Upstash Redis es un almacenamiento persistente al
+# que se accede por HTTP, así que sobrevive a reinicios, redeploys y a que
+# haya varias instancias de la función corriendo en paralelo.
+#
+# Guardamos una key de Redis por entrada (no todo en un JSON gigante), con
+# este esquema de nombres:
+#   materias:<carrerId>   -> {"data": [...], "updatedAt": "..."}
+#   horarios:<hash>       -> {"data": [...], "updatedAt": "..."}
+#   period:current        -> {"value": 11,   "updatedAt": "..."}
+UPSTASH_REDIS_REST_URL = os.environ.get(
+    "UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
-# Lock para que dos requests concurrentes no pisen el archivo al mismo tiempo.
-_backup_lock = asyncio.Lock()
+_UPSTASH_HEADERS = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _read_backup_file() -> dict[str, Any]:
-    """Lectura sincrónica y tolerante a fallos del JSON de respaldo."""
-    if not os.path.exists(BACKUP_FILE):
-        return {"materias": {}, "horarios": {}, "period": None}
-    try:
-        with open(BACKUP_FILE, "r", encoding="utf-8") as f:
-            content = json.load(f)
-            content.setdefault("materias", {})
-            content.setdefault("horarios", {})
-            content.setdefault("period", None)
-            return content
-    except Exception as err:
-        print(f"⚠ No se pudo leer el respaldo local ({BACKUP_FILE}): {err}")
-        return {"materias": {}, "horarios": {}, "period": None}
-
-
-def _write_backup_file(content: dict[str, Any]) -> None:
-    """Escritura atómica (archivo temporal + rename) para no corromper el JSON."""
-    try:
-        tmp_path = f"{BACKUP_FILE}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(content, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, BACKUP_FILE)
-    except Exception as err:
+def _backup_configured() -> bool:
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
         print(
-            f"⚠ No se pudo escribir el respaldo local ({BACKUP_FILE}): {err}")
+            "⚠ UPSTASH_REDIS_REST_URL/TOKEN no configuradas: el respaldo está desactivado.")
+        return False
+    return True
 
 
 async def backup_set(section: str, key: str, data: Any) -> None:
-    """Guarda datos frescos en el respaldo local (sección 'materias' u 'horarios')."""
-    async with _backup_lock:
-        content = _read_backup_file()
-        content.setdefault(section, {})
-        content[section][key] = {"data": data, "updatedAt": _now_iso()}
-        _write_backup_file(content)
+    """Guarda datos frescos en Redis (sección 'materias' u 'horarios')."""
+    if not _backup_configured():
+        return
+    redis_key = f"{section}:{key}"
+    value = json.dumps(
+        {"data": data, "updatedAt": _now_iso()}, ensure_ascii=False)
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.post(
+                f"{UPSTASH_REDIS_REST_URL}/set/{redis_key}",
+                headers=_UPSTASH_HEADERS,
+                content=value.encode("utf-8"),
+            )
+            resp.raise_for_status()
+    except Exception as err:
+        # Si Redis falla al GUARDAR no queremos romper la respuesta al
+        # usuario: sólo lo logueamos y seguimos.
+        print(f"⚠ No se pudo guardar respaldo en Redis ({redis_key}): {err}")
 
 
 async def backup_get(section: str, key: str) -> Optional[dict[str, Any]]:
-    """Lee una entrada puntual del respaldo local, o None si no existe."""
-    async with _backup_lock:
-        content = _read_backup_file()
-        return content.get(section, {}).get(key)
+    """Lee una entrada puntual del respaldo en Redis, o None si no existe/falla."""
+    if not _backup_configured():
+        return None
+    redis_key = f"{section}:{key}"
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                f"{UPSTASH_REDIS_REST_URL}/get/{redis_key}",
+                headers=_UPSTASH_HEADERS,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+    except Exception as err:
+        print(f"⚠ No se pudo leer respaldo en Redis ({redis_key}): {err}")
+        return None
+
+    raw_value = body.get("result")
+    if raw_value is None:
+        return None
+    try:
+        return json.loads(raw_value)
+    except Exception as err:
+        print(f"⚠ Respaldo en Redis con formato inválido ({redis_key}): {err}")
+        return None
 
 
 async def backup_set_period(period: int) -> None:
-    async with _backup_lock:
-        content = _read_backup_file()
-        content["period"] = {"value": period, "updatedAt": _now_iso()}
-        _write_backup_file(content)
+    await backup_set("period", "current", period)
 
 
 async def backup_get_period() -> Optional[int]:
-    async with _backup_lock:
-        content = _read_backup_file()
-        period_entry = content.get("period")
-        if isinstance(period_entry, dict):
-            return period_entry.get("value")
-        return None
+    entry = await backup_get("period", "current")
+    if isinstance(entry, dict):
+        return entry.get("data")
+    return None
 
 
 def _build_horarios_cache_key(payload: Any) -> str:
@@ -702,27 +710,48 @@ async def test():
 @app.get("/api/backup-status")
 async def backup_status():
     """
-    Info de diagnóstico: qué hay guardado en el JSON de respaldo local
+    Info de diagnóstico: qué hay guardado en el respaldo de Upstash Redis
     (carreras con materias guardadas, cantidad de combos de horarios
     guardados, y período académico respaldado). No expone los datos
     completos, sólo un resumen, para no volver la respuesta gigante.
     """
-    async with _backup_lock:
-        content = _read_backup_file()
+    if not _backup_configured():
+        return {
+            "configured": False,
+            "detail": "Faltan las variables de entorno UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN.",
+        }
 
-    materias = content.get("materias", {})
-    horarios = content.get("horarios", {})
-    period = content.get("period")
+    async def _keys(pattern: str) -> list[str]:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.get(
+                    f"{UPSTASH_REDIS_REST_URL}/keys/{pattern}",
+                    headers=_UPSTASH_HEADERS,
+                )
+                resp.raise_for_status()
+                return resp.json().get("result", []) or []
+        except Exception as err:
+            print(f"⚠ Error listando keys de Redis ({pattern}): {err}")
+            return []
 
-    return {
-        "backupFile": BACKUP_FILE,
-        "materias": {
-            carrer_id: {
-                "cantidad": len(entry.get("data", [])),
+    materias_keys = await _keys("materias:*")
+    horarios_keys = await _keys("horarios:*")
+
+    materias_resumen = {}
+    for k in materias_keys:
+        carrer_id = k.split(":", 1)[1] if ":" in k else k
+        entry = await backup_get("materias", carrer_id)
+        if entry:
+            materias_resumen[carrer_id] = {
+                "cantidad": len(entry.get("data", []) or []),
                 "updatedAt": entry.get("updatedAt"),
             }
-            for carrer_id, entry in materias.items()
-        },
-        "horariosGuardados": len(horarios),
-        "period": period,
+
+    period_entry = await backup_get("period", "current")
+
+    return {
+        "configured": True,
+        "materias": materias_resumen,
+        "horariosGuardados": len(horarios_keys),
+        "period": period_entry,
     }
