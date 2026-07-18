@@ -2385,14 +2385,16 @@
 
       function renderConnectedLabel() {
         if (!statusTextEl) return;
-        // Sólo pisamos el texto si ya estamos en estado "conectado" al
-        // backend; si dice "Conectando..." o "Error de conexión" lo dejamos
-        // como está, para no pisar ese estado.
-        if (statusTextEl.dataset.baseState !== "ok") return;
-        statusTextEl.textContent =
-          lastOnlineCount === null
-            ? "Conectado"
-            : `Conectado (${lastOnlineCount})`;
+        // Sólo agregamos el número si el texto actual es exactamente
+        // "Conectado" (estado real de conexión al backend) o ya tiene
+        // el número puesto por nosotros. Si dice "Conectando..." o
+        // "Error de conexión" no lo tocamos.
+        const txt = statusTextEl.textContent || "";
+        const isConnectedBase = txt === "Conectado";
+        const isConnectedWithCount = /^Conectado \(\d+\)$/.test(txt);
+        if (!isConnectedBase && !isConnectedWithCount) return;
+        if (lastOnlineCount === null) return;
+        statusTextEl.textContent = `Conectado (${lastOnlineCount})`;
       }
 
       onValue(presenceRootRef, (snapshot) => {
@@ -2401,26 +2403,13 @@
         renderConnectedLabel();
       });
 
-      // El script original setea statusText.textContent = "Conectado" en
-      // otro <script> (no-module) que corre antes que este. Observamos ese
-      // nodo para saber cuándo pasa a estado "conectado" y en ese momento
-      // agregarle el número, sin tocar el código original.
-      if (statusTextEl) {
-        const statusObserver = new MutationObserver(() => {
-          const txt = statusTextEl.textContent || "";
-          if (txt.startsWith("Conectado")) {
-            statusTextEl.dataset.baseState = "ok";
-            renderConnectedLabel();
-          } else {
-            statusTextEl.dataset.baseState = "other";
-          }
-        });
-        statusObserver.observe(statusTextEl, {
-          childList: true,
-          characterData: true,
-          subtree: true,
-        });
-      }
+      // El script original (no-module) es el que pone "Conectado" en
+      // statusText tras cargar los datos del backend. Como corre antes
+      // que este módulo y puede volver a escribir ese texto más adelante
+      // (reintentos, refrescos, etc.), chequeamos periódicamente si el
+      // texto pasó a "Conectado" para agregarle el número. Es liviano
+      // (una comparación de string cada 500ms) y no interfiere con nada.
+      setInterval(renderConnectedLabel, 500);
 
       const BASE_URL = "";
 
