@@ -12,16 +12,6 @@
     />
     <link rel="stylesheet" href="styles.css" />
     <style>
-      /* Contador de usuarios conectados en tiempo real (Firebase presence) */
-      #onlinePill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .online-dot {
-        background: #22c55e;
-        box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
-      }
       /* Botón flotante "volver arriba" dentro de la lista de materias */
       .scroll-top-btn {
         position: fixed;
@@ -109,10 +99,6 @@
         <div class="status-pill">
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">Conectando...</span>
-        </div>
-        <div class="status-pill" id="onlinePill" title="Usuarios conectados ahora">
-          <span class="status-dot online-dot"></span>
-          <span id="onlineCount">–</span>
         </div>
       </div>
     </header>
@@ -2394,12 +2380,47 @@
         }
       });
 
-      const onlineCountEl = document.getElementById("onlineCount");
+      const statusTextEl = document.getElementById("statusText");
+      let lastOnlineCount = null;
+
+      function renderConnectedLabel() {
+        if (!statusTextEl) return;
+        // Sólo pisamos el texto si ya estamos en estado "conectado" al
+        // backend; si dice "Conectando..." o "Error de conexión" lo dejamos
+        // como está, para no pisar ese estado.
+        if (statusTextEl.dataset.baseState !== "ok") return;
+        statusTextEl.textContent =
+          lastOnlineCount === null
+            ? "Conectado"
+            : `Conectado (${lastOnlineCount})`;
+      }
+
       onValue(presenceRootRef, (snapshot) => {
         const val = snapshot.val();
-        const count = val ? Object.keys(val).length : 0;
-        if (onlineCountEl) onlineCountEl.textContent = String(count);
+        lastOnlineCount = val ? Object.keys(val).length : 0;
+        renderConnectedLabel();
       });
+
+      // El script original setea statusText.textContent = "Conectado" en
+      // otro <script> (no-module) que corre antes que este. Observamos ese
+      // nodo para saber cuándo pasa a estado "conectado" y en ese momento
+      // agregarle el número, sin tocar el código original.
+      if (statusTextEl) {
+        const statusObserver = new MutationObserver(() => {
+          const txt = statusTextEl.textContent || "";
+          if (txt.startsWith("Conectado")) {
+            statusTextEl.dataset.baseState = "ok";
+            renderConnectedLabel();
+          } else {
+            statusTextEl.dataset.baseState = "other";
+          }
+        });
+        statusObserver.observe(statusTextEl, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      }
 
       const BASE_URL = "";
 
