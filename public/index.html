@@ -7,11 +7,193 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Exo+2:wght@500;600;700;800&family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Exo+2:wght@500;600;700;800&family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Poppins:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Aplicamos el tema ANTES de pintar el resto de la página (bloqueante,
+      // en el <head>) para que no se vea un flash del tema oscuro por defecto
+      // y después un salto al tema guardado. Por defecto, si nunca se eligió
+      // nada, queda oscuro (el original).
+      (function () {
+        try {
+          var saved = localStorage.getItem("unaj_theme");
+          if (saved === "light") {
+            document.documentElement.setAttribute("data-theme", "light");
+          }
+        } catch (e) {
+          /* localStorage no disponible: seguimos en oscuro por defecto */
+        }
+      })();
+    </script>
     <style>
+      .consulta-intermedio-box {
+        margin: 14px 0;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+      }
+      .consulta-intermedio-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        font-size: 0.95rem;
+      }
+      .consulta-equiv-box {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        margin: 10px 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+      }
+      .consulta-equiv-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .consulta-equiv-chip {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: rgba(0,229,255,0.08);
+        font-size: 0.82rem;
+      }
+      html[data-theme="light"] .consulta-equiv-chip {
+        background: rgba(0,180,210,0.12);
+      }
+      .consulta-intermedio-faltan-btn {
+        margin-top: 10px;
+        width: 100%;
+      }
+      .consulta-intermedio-faltan-box {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .consulta-intermedio-faltan-empty {
+        font-size: 0.85rem;
+        opacity: 0.8;
+        text-align: center;
+        padding: 6px 0;
+      }
+      .consulta-intermedio-faltan-item {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        padding: 4px 0;
+        font-size: 0.85rem;
+        border-bottom: 1px solid var(--line);
+      }
+      .consulta-intermedio-faltan-item:last-child {
+        border-bottom: none;
+      }
+      .consulta-intermedio-faltan-code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.78rem;
+        opacity: 0.75;
+        white-space: nowrap;
+      }
+
+      .pdf-preview-status {
+        text-align: center;
+        padding: 24px 12px;
+        opacity: 0.8;
+        font-size: 0.9rem;
+      }
+      .pdf-preview-frame {
+        width: 100%;
+        height: 70vh;
+        border: none;
+        border-radius: 6px;
+        background: #fff;
+      }
+      .pdf-preview-canvas-box {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: 8px 0 16px;
+        max-height: 70vh;
+        overflow: auto;
+      }
+      .pdf-preview-canvas-box canvas {
+        display: block;
+        flex-shrink: 0;
+        width: auto;
+        height: auto;
+        max-width: none;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+        border-radius: 4px;
+      }
+      .pdf-preview-controls {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 8px 0;
+      }
+      .pdf-page-indicator {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.85rem;
+        opacity: 0.85;
+        min-width: 64px;
+        text-align: center;
+      }
+
+      /* Estados de materias en el resultado de la consulta */
+      .consulta-habilitada-item[data-estado="aprobada"] {
+        opacity: 0.7;
+      }
+      .consulta-habilitada-item[data-estado="aprobada"] .consulta-habilitada-code,
+      .consulta-habilitada-item[data-estado="aprobada"] .consulta-habilitada-info b {
+        color: #6b6b70;
+        text-decoration: line-through;
+        text-decoration-color: #6b6b70;
+      }
+      .consulta-habilitada-item[data-estado="habilitada"] .consulta-habilitada-code,
+      .consulta-habilitada-item[data-estado="habilitada"] .consulta-habilitada-info b {
+        color: var(--text);
+        text-decoration: none !important;
+      }
+      .consulta-habilitada-item[data-estado="bloqueada"] .consulta-habilitada-code,
+      .consulta-habilitada-item[data-estado="bloqueada"] .consulta-habilitada-info b {
+        color: #ef4444;
+        text-decoration: none !important;
+      }
+
+      .consulta-descarga-box {
+        margin: 14px 0;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+      }
+      .consulta-descarga-label {
+        font-size: 0.85rem;
+        opacity: 0.85;
+        margin-bottom: 10px;
+      }
+      .consulta-descarga-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .consulta-descarga-row .btn-modal {
+        flex: 1;
+        min-width: 160px;
+      }
+
       /* Botón flotante "volver arriba" dentro de la lista de materias */
       .scroll-top-btn {
         position: fixed;
@@ -35,6 +217,11 @@
         transform: translateY(6px);
         transition: opacity 0.18s ease, transform 0.18s ease, background 0.15s ease;
       }
+      html[data-theme="light"] .scroll-top-btn {
+        background: rgba(255,255,255,0.85);
+        border: 1px solid rgba(20,30,60,0.18);
+        color: #16213a;
+      }
       .scroll-top-btn.visible {
         opacity: 1;
         visibility: visible;
@@ -42,6 +229,9 @@
       }
       .scroll-top-btn:hover {
         background: rgba(50, 50, 56, 0.9);
+      }
+      html[data-theme="light"] .scroll-top-btn:hover {
+        background: rgba(240,242,248,0.95);
       }
       .scroll-top-btn svg {
         width: 18px;
@@ -56,7 +246,7 @@
           <img src="logounaj.svg" alt="UNAJ" />
         </div>
         <div>
-          <h1>Oferta Académica - UNAJ</h1>
+          <h1>Oferta Académica - UNAJ<span class="status-dot" id="statusDot"></span></h1>
           <p class="texto_terminal">
             Terminal de consulta
             <span class="texto_horarios"
@@ -66,39 +256,50 @@
         </div>
       </div>
       <div class="header-actions">
-        <button
-          class="sound-toggle"
-          id="linksToggle"
-          type="button"
-          title="Ver links útiles"
-        >
-          <span class="icon" id="linksIcon"></span>
-          <span>Links</span>
-        </button>
-        <button
-          class="sound-toggle"
-          id="calendarToggle"
-          type="button"
-          title="Ver mi horario"
-        >
-          <span class="icon" id="calendarIcon"></span>
-          <span>Mis Horarios</span>
-          <span class="cal-count-badge" id="calCountBadge" style="display: none"
-            >0</span
-          >
-        </button>
-        <button
-          class="sound-toggle"
-          id="soundToggle"
-          type="button"
-          title="Activar/desactivar sonido"
-        >
-          <span class="icon" id="soundIcon"></span>
-          <span id="soundLabel">Sonido</span>
-        </button>
         <div class="status-pill">
-          <span class="status-dot" id="statusDot"></span>
           <span id="statusText">Conectando...</span>
+        </div>
+
+        <div class="menu-wrap">
+          <button
+            class="menu-trigger"
+            id="menuTrigger"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            title="Menú"
+          >
+            <span class="icon" id="menuIcon"></span>
+            <span>Menú</span>
+            <span class="cal-count-badge" id="calCountBadge" style="display: none"
+              >0</span
+            >
+            <span class="icon menu-caret" id="menuCaret"></span>
+          </button>
+          
+          <div class="menu-panel" id="menuPanel" role="menu">
+            <button class="menu-item" id="calendarToggle" type="button" role="menuitem">
+              <span class="icon" id="calendarIcon"></span>
+              <span class="menu-item-label">Mis Horarios</span>
+              <span class="cal-count-badge" id="calCountBadgeMenu" style="display: none">0</span>
+            </button>
+            <button class="menu-item" id="themeToggle" type="button" role="menuitem">
+              <span class="icon" id="themeIcon"></span>
+              <span class="menu-item-label" id="themeLabel">Tema oscuro</span>
+            </button>
+            <button class="menu-item" id="soundToggle" type="button" role="menuitem">
+              <span class="icon" id="soundIcon"></span>
+              <span class="menu-item-label" id="soundLabel">Sonido</span>
+            </button>
+
+            <div class="menu-divider"></div>
+
+            <button class="menu-item" id="linksToggle" type="button" role="menuitem">
+              <span class="icon" id="linksIcon"></span>
+              <span class="menu-item-label">Links</span>
+            </button>
+            
+          </div>
         </div>
       </div>
     </header>
@@ -256,14 +457,44 @@
           Todavía no agregaste ninguna materia. Buscá una comisión y tocá
           "Agregar al planificador".
         </div>
-        <div id="calendarGridWrap" class="calendar-grid-wrap">
-          <div id="calendarNoTimeRow" class="cal-notime-row"></div>
-          <div id="calendarGrid" class="cal-grid"></div>
+        <div class="calendar-grid-outer" id="calendarGridOuter">
+          <div id="calendarGridWrap" class="calendar-grid-wrap">
+            <div id="calendarNoTimeRow" class="cal-notime-row"></div>
+            <div id="calendarGrid" class="cal-grid"></div>
+          </div>
+          <button
+            class="cal-fullscreen-btn"
+            id="calendarFullscreenBtn"
+            type="button"
+            title="Pantalla completa"
+          >
+            <span id="calendarFsIcon"></span>
+          </button>
         </div>
-        <div id="calendarNoSchedule" class="calendar-no-schedule"></div>
+       <div id="calendarNoSchedule" class="calendar-no-schedule"></div>
         <div id="calendarList" class="calendar-list"></div>
         <div class="modal-actions">
           <button class="btn-modal cancel" id="calendarCloseBtn">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="pdfColorModeModal" class="modal-overlay">
+      <div class="modal-card pdf-colormode-card">
+        <h3>Descargar PDF</h3>
+        <p class="pdf-colormode-text">¿Cómo querés el PDF?</p>
+        <div class="pdf-colormode-actions">
+          <button class="btn-modal confirm" id="pdfColorModeColorBtn">
+            Color
+          </button>
+          <button class="btn-modal confirm" id="pdfColorModeBwBtn">
+            Blanco y negro
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-modal cancel" id="pdfColorModeCancelBtn">
+            Cancelar
+          </button>
         </div>
       </div>
     </div>
@@ -281,9 +512,12 @@
       </div>
     </div>
 
+
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
-      const BASE_URL = "";
+      const BASE_URL = "http://127.0.0.1:8000";
 
       /* ---------------- CATÁLOGO DE INSTITUTOS Y CARRERAS ---------------- */
       // Estructura declarada explícitamente a partir de los datos provistos.
@@ -382,6 +616,12 @@
       <path d="M16.2 9.8L20.2 13.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
       <path d="M20.2 9.8L16.2 13.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
     </svg>`,
+        file: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M6.5 3.5H14L18.5 8V20.5H6.5V3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M14 3.5V8H18.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M9 13H16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      <path d="M9 16.4H16" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>`,
         download: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M12 4V15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
       <path d="M7.5 11L12 15.5L16.5 11" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -392,9 +632,141 @@
       <path d="M11 6.8L12.4 5.4C14 3.8 16.6 3.8 18.2 5.4C19.8 7 19.8 9.6 18.2 11.2L16.8 12.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
       <path d="M13 17.2L11.6 18.6C10 20.2 7.4 20.2 5.8 18.6C4.2 17 4.2 14.4 5.8 12.8L7.2 11.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
     </svg>`,
+        consulta: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9 9.5C9 7.6 10.5 6.2 12.2 6.2C13.9 6.2 15.2 7.4 15.2 9C15.2 10.4 14.3 11 13.3 11.7C12.4 12.3 12 12.9 12 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="12" cy="17.3" r="1.05" fill="currentColor"/>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+    </svg>`,
+        expand: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9 4H4V9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M15 4H20V9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M9 20H4V15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M15 20H20V15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`,
+        compress: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4 9H9V4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M20 9H15V4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 15H9V20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M20 15H15V20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`,
+        menu: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4 6.5H20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M4 12H20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M4 17.5H20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>`,
+        chevronDown: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>`,
+        sun: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="4.4" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M12 2.6V5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M12 19V21.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M4.5 4.5L6.2 6.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M17.8 17.8L19.5 19.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M2.6 12H5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M19 12H21.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M4.5 19.5L6.2 17.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M17.8 6.2L19.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </svg>`,
+        moon: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M20.2 14.3C18.9 14.9 17.4 15.2 15.9 15C11.9 14.5 8.9 11 9.1 7C9.2 5.6 9.6 4.3 10.3 3.2C6.4 4 3.5 7.5 3.5 11.7C3.5 16.5 7.4 20.4 12.2 20.4C15.9 20.4 19 18.1 20.2 14.3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+    </svg>`,
       };
       document.getElementById("calendarIcon").innerHTML = ICONS.calendar;
       document.getElementById("linksIcon").innerHTML = ICONS.link;
+      document.getElementById("menuIcon").innerHTML = ICONS.menu;
+      document.getElementById("menuCaret").innerHTML = ICONS.chevronDown;
+
+      /* ---------------- MENÚ DESPLEGABLE DEL HEADER ---------------- */
+      (function initHeaderMenu() {
+        const trigger = document.getElementById("menuTrigger");
+        const panel = document.getElementById("menuPanel");
+        if (!trigger || !panel) return;
+
+        function openMenu() {
+          panel.classList.add("open");
+          trigger.setAttribute("aria-expanded", "true");
+        }
+        function closeMenu() {
+          panel.classList.remove("open");
+          trigger.setAttribute("aria-expanded", "false");
+        }
+        function toggleMenu() {
+          if (panel.classList.contains("open")) closeMenu();
+          else openMenu();
+        }
+
+        trigger.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleMenu();
+        });
+
+        // Cierra al tocar afuera
+        document.addEventListener("click", (e) => {
+          if (!panel.contains(e.target) && e.target !== trigger) closeMenu();
+        });
+
+        // Cierra con Escape
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") closeMenu();
+        });
+
+        // Cualquier item del menú lo cierra al tocarlo (los propios handlers
+        // de cada botón abren su modal correspondiente por separado).
+        panel.querySelectorAll(".menu-item").forEach((item) => {
+          item.addEventListener("click", () => closeMenu());
+        });
+      })();
+
+      /* ---------------- TEMA CLARO / OSCURO ---------------- */
+      const THEME_STORAGE_KEY = "unaj_theme";
+
+      function getCurrentTheme() {
+        return document.documentElement.getAttribute("data-theme") === "light"
+          ? "light"
+          : "dark";
+      }
+
+      function updateThemeToggleUI() {
+        const icon = document.getElementById("themeIcon");
+        const label = document.getElementById("themeLabel");
+        if (!icon || !label) return;
+        const theme = getCurrentTheme();
+        if (theme === "light") {
+          icon.innerHTML = ICONS.sun;
+          label.textContent = "Tema oscuro";
+        } else {
+          icon.innerHTML = ICONS.moon;
+          label.textContent = "Tema claro";
+        }
+      }
+
+      function setTheme(theme) {
+        if (theme === "light") {
+          document.documentElement.setAttribute("data-theme", "light");
+        } else {
+          document.documentElement.removeAttribute("data-theme");
+        }
+        try {
+          localStorage.setItem(THEME_STORAGE_KEY, theme);
+        } catch (e) {
+          /* ignore */
+        }
+        updateThemeToggleUI();
+      }
+
+      function toggleTheme() {
+        setTheme(getCurrentTheme() === "light" ? "dark" : "light");
+      }
+
+      document
+        .getElementById("themeToggle")
+        .addEventListener("click", () => {
+          toggleTheme();
+          sndTick();
+        });
+
+      updateThemeToggleUI();
 
       /* ---------------- SONIDO (Web Audio API, sin archivos externos) ---------------- */
       let audioCtx = null;
@@ -876,18 +1248,18 @@
           subject._instituteId ||
           7;
         const careerId =
-          (subject.carrer && subject.carrer.id) || subject._carrerId || null;
+          (subject.carrer && subject.carrer.id) ||
+          subject._carrerId ||
+          null;
 
-        // academicPeriodId: valor "de relleno". El backend (/api/horarios)
-        // lo detecta solo contra la página oficial y lo pisa antes de
-        // reenviar, así que este número ya no hace falta actualizarlo
-        // a mano nunca más.
+        // academicPeriodId: no hace falta mandarlo. El backend
+        // (/api/horarios) lo detecta solo contra la página oficial y lo
+        // agrega/pisa antes de reenviar, así que da igual si está o no acá.
         const payload = [
           {
             instituteId: instituteId,
             subjectId: subject.subjectId,
             careerId: careerId,
-            academicPeriodId: 11,
           },
         ];
 
@@ -899,14 +1271,7 @@
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
-          const usandoBackup = !Array.isArray(data) && data && data.fromCache === true;
-          const itemsCrudos = Array.isArray(data) ? data : data.items || [];
-          // Si vino del respaldo, marcamos cada comisión para que
-          // isComisionAssigned() muestre siempre la última aula guardada,
-          // sin importar lo que diga "assignament".
-          const items = usandoBackup
-            ? itemsCrudos.map((com) => ({ ...com, __fromBackup: true }))
-            : itemsCrudos;
+          const items = Array.isArray(data) ? data : data.items || [];
           renderCoordinatorBanner(findCoordinator(items));
           renderComisiones(items);
           sndSuccess();
@@ -987,6 +1352,26 @@
         );
       }
 
+      function getPrimaryTeacherName(com) {
+        const teachers = Array.isArray(com.teachers) ? com.teachers : [];
+        const normalizedTeachers = teachers
+          .map((t) => {
+            if (typeof t === "string") return { name: t, role: "" };
+            const name = t.teacherFullName || t.fullName || t.name || "";
+            const role =
+              t.teacherRoleName ||
+              t.teacherRoleDescription ||
+              t.role ||
+              t.roleName ||
+              "";
+            return { name, role };
+          })
+          .filter((t) => t.name);
+        const primary =
+          pickPrimaryTeacher(normalizedTeachers) || normalizedTeachers[0] || null;
+        return primary ? primary.name : "";
+      }
+
       function isAsincronica(modalidad) {
         return /asincr/i.test(modalidad || "");
       }
@@ -1045,6 +1430,7 @@
         if (n.startsWith("vie")) return "viernes";
         if (n.startsWith("sab")) return "sabado";
         if (n.startsWith("dom")) return "domingo";
+        // algunos backends mandan abreviaturas de 2-3 letras (L, M, Mi, J, V, S, D)
         if (/^lu?$/.test(n)) return "lunes";
         if (/^ma?$/.test(n)) return "martes";
         if (/^mi?$/.test(n)) return "miercoles";
@@ -1055,30 +1441,13 @@
         return null;
       }
 
-      function pickField(objOrList, names) {
-        const sources = Array.isArray(objOrList) ? objOrList : [objOrList];
-        for (const obj of sources) {
-          for (const n of names) {
-            if (obj && obj[n] !== undefined && obj[n] !== null && obj[n] !== "")
-              return obj[n];
-          }
-        }
-        return null;
-      }
-
       const PENDIENTE_ASIGNAR = "Aula Pendiente de asignar";
 
       // Determina si una comisión ya tiene el aula/edificio confirmados
       // (assignament.id === 3 o descripción "Asignada"/"Asignado").
       // Si está en id 1, 2 o la descripción dice "No Asignada" / "Pendiente...",
       // hay que ocultar el aula/edificio mostrando el mensaje genérico.
-      //
-      // EXCEPCIÓN: si la comisión viene del respaldo (la página oficial
-      // estaba caída y se usó el JSON guardado), no nos importa lo que
-      // diga "assignament" -- mostramos directamente la última aula que
-      // se llegó a guardar, sea cual sea su estado de asignación.
       function isComisionAssigned(com) {
-        if (com && com.__fromBackup) return true;
         const a = (com && (com.assignament || com.asignamiento)) || null;
         if (!a) return true; // sin info de estado, no ocultamos nada
         const id = a.id;
@@ -1097,6 +1466,37 @@
         return true;
       }
 
+      // Busca en un objeto el primer campo no vacío entre varios nombres posibles
+      // (distintas versiones del backend usan distintas convenciones de nombre).
+      // Acepta uno o varios objetos "fuente": revisa el primero por completo antes
+      // de pasar al siguiente, así se puede priorizar p. ej. un sub-objeto
+      // "schedule" por sobre el objeto del día que lo contiene.
+      function pickField(objOrList, names) {
+        const sources = Array.isArray(objOrList) ? objOrList : [objOrList];
+        for (const obj of sources) {
+          for (const n of names) {
+            if (obj && obj[n] !== undefined && obj[n] !== null && obj[n] !== "")
+              return obj[n];
+          }
+        }
+        return null;
+      }
+
+      // Distintas respuestas del backend traen el horario real anidado bajo una
+      // etiqueta "schedule" dentro de cada día (en vez de tener startHour/endHour
+      // sueltos directamente en el día). Antes el código sólo miraba los campos
+      // de primer nivel del día, así que si el horario venía únicamente adentro
+      // de "schedule" no se detectaba y la comisión quedaba fuera del
+      // planificador (como si no tuviera horario informado).
+      //
+      // Esta función devuelve, para un día "d" tal cual viene del backend, una
+      // lista de "franjas" a procesar. Cada franja es un arreglo de objetos-fuente
+      // en orden de prioridad: primero lo que venga adentro de "schedule" (puede
+      // ser un objeto único o un arreglo de franjas horarias), y por último el
+      // propio día (como respaldo, por si algún campo no está duplicado adentro
+      // de "schedule"). Si "schedule" es un arreglo con más de una franja, se
+      // devuelve una entrada por franja (p. ej. clase teórica y práctica el mismo
+      // día pero en dos horarios distintos).
       function expandScheduleEntries(d) {
         const raw = d && (d.schedule ?? d.horario ?? d.horarios);
         if (!raw) return [[d]];
@@ -1110,12 +1510,17 @@
         return [[d]];
       }
 
+      // Extrae HH:MM de un string de hora y lo devuelve en minutos desde 00:00, o null si no se pudo.
+      // Soporta variantes: "7:00", "07:00", "07.00", "0700", "19hs", "19 h 00", "19:00:00",
+      // y también formato 12 horas con AM/PM: "9:00AM", "1:00 PM", "9:00 a. m.", etc.
       function parseTimeToMinutes(str) {
         if (str === null || str === undefined) return null;
         if (typeof str === "number") {
-          if (str > 0 && str < 24) return Math.round(str * 60);
+          // algunos backends mandan directamente minutos desde medianoche
+          if (str > 0 && str < 24) return Math.round(str * 60); // ej: 7.5 -> 7:30
           if (str >= 24 && str < 1440) return Math.round(str);
           if (str >= 100 && str < 2400) {
+            // ej: 700, 1930
             const h = Math.floor(str / 100),
               m = str % 100;
             return h * 60 + m;
@@ -1124,6 +1529,10 @@
         let s = String(str).trim();
         if (!s) return null;
 
+        // Formato 12 horas con AM/PM: "9:00AM", "1:00 PM", "9:00a.m.", "1:00p. m.", etc.
+        // Se busca ANTES que el resto de los formatos porque "1:00PM" matchea
+        // también la regex genérica de HH:MM (dando 01:00, la 1 de la madrugada)
+        // y sin este chequeo antes, el PM se perdía silenciosamente.
         let mAmPm = s.match(
           /(\d{1,2})\s*[:.]?\s*(\d{2})?\s*([aApP])\.?\s*\.?\s*m\.?/i,
         );
@@ -1132,12 +1541,13 @@
           const min = mAmPm[2] ? parseInt(mAmPm[2], 10) : 0;
           const isPM = /p/i.test(mAmPm[3]);
           if (!isNaN(h) && !isNaN(min) && h <= 12 && min < 60) {
-            if (h === 12) h = 0;
+            if (h === 12) h = 0; // 12:00 AM = 00:00, 12:00 PM = 12:00
             if (isPM) h += 12;
             return h * 60 + min;
           }
         }
 
+        // HH:MM, HH.MM, HHhMM, HH:MM:SS
         let m = s.match(/(\d{1,2})\s*[:.hH]\s*(\d{2})/);
         if (m) {
           const h = parseInt(m[1], 10),
@@ -1145,12 +1555,14 @@
           if (!isNaN(h) && !isNaN(min) && h < 24 && min < 60)
             return h * 60 + min;
         }
+        // "1900" / "0700" (4 dígitos juntos)
         m = s.match(/^(\d{2})(\d{2})$/);
         if (m) {
           const h = parseInt(m[1], 10),
             min = parseInt(m[2], 10);
           if (h < 24 && min < 60) return h * 60 + min;
         }
+        // Solo la hora, sin minutos: "19", "19hs", "19 h"
         m = s.match(/^(\d{1,2})\s*(?:hs?\.?)?$/i);
         if (m) {
           const h = parseInt(m[1], 10);
@@ -1159,9 +1571,13 @@
         return null;
       }
 
+      // Si un mismo campo trae el rango completo ("19:00 a 21:00", "19:00-21:00",
+      // "19:00 hs. a 21:00 hs.", "9:00AM - 1:00PM"), devuelve [inicioMin, finMin].
       function parseTimeRange(str) {
         if (!str) return null;
         const s = String(str);
+        // OJO: el separador "a" tiene que estar solo entre espacios (" a ") para
+        // no romper "AM"/"PM"/"a.m."/"p.m.", que también contienen la letra "a".
         const parts = s
           .split(/\s+a\s+|\s+hasta\s+|\s*[-—–]\s*/i)
           .filter(Boolean);
@@ -1181,12 +1597,22 @@
         return `${h}:${m}`;
       }
 
+      // Clave estable por materia: antes se usaba solo subjectId, y como
+      // Informática / Básicas / Iniciales son catálogos distintos, dos materias
+      // de categorías distintas podían compartir el mismo subjectId y el sistema
+      // las trataba como "la misma materia" (eso disparaba el reemplazo automático
+      // que sacaba comisiones sin que el usuario lo pidiera). Ahora el instituto y
+      // la carrera forman parte de la clave.
       function subjectKey(subject) {
+        const cat =
+          subject && (subject._instituteId !== undefined || subject._carrerId !== undefined)
+            ? `${subject._instituteId ?? ""}-${subject._carrerId ?? ""}`
+            : "";
         const id =
           (subject &&
             (subject.subjectId ?? normalizeText(subject.name || "materia"))) ??
           "materia";
-        return `${id}`;
+        return `${cat}__${id}`;
       }
 
       function comisionKey(subject, com) {
@@ -1209,6 +1635,17 @@
         );
       }
 
+      // Arma los "bloques" horarios de una comisión.
+      // - timeBlocks: días con horario real (día + hora inicio/fin parseables), sin
+      //   importar si la modalidad es sincrónica o asincrónica. Estos son los que
+      //   se dibujan en la grilla del planificador. Antes, las comisiones
+      //   asincrónicas quedaban excluidas de acá aunque tuvieran horario real
+      //   informado, lo que las hacía "desaparecer" del planificador (terminaban
+      //   como chip suelto en vez de ocupar su franja horaria real).
+      // - looseDays: días de cursada que SÍ figuran en la comisión pero sin un
+      //   horario parseable (dato faltante o con formato no reconocido). Se
+      //   conservan igual para poder mostrarlos como "sin horario fijo" dentro del
+      //   día correspondiente.
       function buildBlocksFromCom(com) {
         const assigned = isComisionAssigned(com);
         const days = Array.isArray(com.days)
@@ -1221,6 +1658,9 @@
         const timeBlocks = [];
         const looseDays = [];
         days.forEach((d) => {
+          // Una misma entrada de día puede traer más de una franja horaria real
+          // adentro de "schedule" (p. ej. teórica y práctica el mismo día). Cada
+          // franja se procesa como si fuera un día propio.
           expandScheduleEntries(d).forEach((sources) => {
             const dayName = pickField(sources, [
               "daysOfWeekName",
@@ -1266,6 +1706,7 @@
             let startMin = parseTimeToMinutes(rawStart);
             let endMin = parseTimeToMinutes(rawEnd);
 
+            // Si vino todo en un solo campo como rango ("19:00 a 21:00"), lo partimos.
             if (startMin === null || endMin === null) {
               const rangeFromStart = parseTimeRange(rawStart);
               const rangeFromEnd = parseTimeRange(rawEnd);
@@ -1279,8 +1720,8 @@
             const hasValidRange =
               startMin !== null && endMin !== null && endMin > startMin;
 
-            if (key && hasValidRange) {
-              timeBlocks.push({
+            if (key && hasValidRange && !isAsincronica(modalidad)) {
+                timeBlocks.push({
                 dayKey: key,
                 startMin,
                 endMin,
@@ -1288,6 +1729,8 @@
                 aula,
                 edificio,
               });
+            } else if (key && hasValidRange && isAsincronica(modalidad)) {
+              looseDays.push({ dayKey: null, modalidad, aula });
             } else {
               looseDays.push({ dayKey: key || null, modalidad, aula });
             }
@@ -1296,6 +1739,7 @@
         return { timeBlocks, looseDays };
       }
 
+      // Busca superposiciones de "blocks" contra los items ya guardados (excluyendo excludeKey)
       function findConflicts(blocks, excludeKey) {
         const conflicts = [];
         calendarItems.forEach((item) => {
@@ -1363,6 +1807,7 @@
           subjectName: subject.name || "Materia",
           comisionName:
             com.commissionName || com.comisionName || com.name || "Comisión",
+          teacherName: getPrimaryTeacherName(com),
           blocks: timeBlocks,
           looseDays,
         });
@@ -1387,13 +1832,17 @@
 
       function updateCalCountBadge() {
         const badge = document.getElementById("calCountBadge");
-        if (!badge) return;
-        if (calendarItems.length === 0) {
-          badge.style.display = "none";
-        } else {
-          badge.style.display = "inline-flex";
-          badge.textContent = calendarItems.length;
-        }
+        const badgeMenu = document.getElementById("calCountBadgeMenu");
+        const count = calendarItems.length;
+        [badge, badgeMenu].forEach((el) => {
+          if (!el) return;
+          if (count === 0) {
+            el.style.display = "none";
+          } else {
+            el.style.display = "inline-flex";
+            el.textContent = count;
+          }
+        });
       }
 
       function syncCalendarButtons() {
@@ -1441,7 +1890,7 @@
       }
 
       function layoutDayBlocksPacked(entries) {
-        const FIXED_BLOCK_HEIGHT = 140;
+        const FIXED_BLOCK_HEIGHT = 200;
         if (entries.length === 0) return { placed: [], totalHeight: 0 };
 
         const n = entries.length;
@@ -1625,33 +2074,8 @@
             : ["lunes", "martes", "miercoles", "jueves", "viernes"];
 
         noTimeRow.style.gridTemplateColumns = `repeat(${dayKeys.length}, 1fr)`;
-        const anyLooseWithDay = looseWithDay.some(({ loose }) =>
-          dayKeys.includes(loose.dayKey),
-        );
-        if (!anyLooseWithDay) {
-          noTimeRow.innerHTML = "";
-          noTimeRow.style.display = "none";
-        } else {
-          noTimeRow.style.display = "grid";
-          noTimeRow.innerHTML = dayKeys
-            .map((dk) => {
-              const chips = looseWithDay.filter(
-                ({ loose }) => loose.dayKey === dk,
-              );
-              if (chips.length === 0)
-                return `<div class="cal-notime-cell"></div>`;
-              return `<div class="cal-notime-cell">${chips
-                .map(({ item, loose }) => {
-                  const color = colorFor(item.subjectKeyRef);
-                  return `<div class="cal-notime-chip" style="border-color:${color}">
-            <b style="color:${color}">${escapeHtml(item.subjectName)}</b>
-            <span>${escapeHtml(item.comisionName || "")}${loose.modalidad ? " · " + escapeHtml(loose.modalidad) : ""}</span>
-          </div>`;
-                })
-                .join("")}</div>`;
-            })
-            .join("");
-        }
+        noTimeRow.innerHTML = "";
+        noTimeRow.style.display = "none";
 
         const grid = document.getElementById("calendarGrid");
         grid.style.gridTemplateColumns = `repeat(${dayKeys.length}, 1fr)`;
@@ -1692,6 +2116,7 @@
           <div class="cal-block" style="top:${top}px; height:${height}px; left:calc(${leftPct}% + 2px); width:calc(${widthPct}% - 4px); border-color:${color}; background:${hexToRgba(color, 0.13)};">
             <b style="color:${color}">${escapeHtml(item.subjectName)}</b>
             <span>${escapeHtml(item.comisionName)}</span>
+            ${item.teacherName ? `<span>${escapeHtml(item.teacherName)}</span>` : ""}
             <span>${formatMinutes(b.startMin)}–${formatMinutes(b.endMin)}${b.aula ? " · " + escapeHtml(b.aula) : ""}${modalidadTag}</span>
           </div>`;
           });
@@ -1700,32 +2125,7 @@
 
         grid.innerHTML = html;
 
-        if (looseWithoutDay.length === 0) {
-          noScheduleWrap.innerHTML = "";
-        } else {
-          const seen = new Set();
-          const uniqueChips = [];
-          looseWithoutDay.forEach(({ item, loose }) => {
-            if (seen.has(item.subjectKeyRef)) return;
-            seen.add(item.subjectKeyRef);
-            uniqueChips.push({ item, loose });
-          });
-          noScheduleWrap.innerHTML = `
-        <div class="cs-label no-schedule-label">Sin horario ni día definido</div>
-        <div class="no-schedule-chips">
-          ${uniqueChips
-            .map(({ item, loose }) => {
-              const color = colorFor(item.subjectKeyRef);
-              return `
-              <div class="no-schedule-chip" style="border-color:${color}">
-                <b style="color:${color}">${escapeHtml(item.subjectName)}</b>
-                <span>${escapeHtml(item.comisionName || "")}</span>
-                ${loose.modalidad ? `<span class="chip-day">${escapeHtml(loose.modalidad)}</span>` : ""}
-              </div>`;
-            })
-            .join("")}
-        </div>`;
-        }
+        noScheduleWrap.innerHTML = "";
 
         list.innerHTML = sortedItems
           .map(
@@ -1734,6 +2134,7 @@
         <div>
           <b>${escapeHtml(item.subjectName)}</b>
           <span>${escapeHtml(item.comisionName)}</span>
+          ${item.teacherName ? `<span>${escapeHtml(item.teacherName)}</span>` : ""}
         </div>
         <button class="btn-modal cancel cal-remove-btn" data-remove-key="${escapeHtml(item.key)}">Quitar</button>
       </div>
@@ -1786,6 +2187,56 @@
           if (selectedSubject) syncCalendarButtons();
         });
 
+      /* ---------------- PANTALLA COMPLETA (solo la grilla del horario) ---------------- */
+      const calendarCardEl = document.getElementById("calendarGridOuter");
+      const calendarFsBtn = document.getElementById("calendarFullscreenBtn");
+      const calendarFsIcon = document.getElementById("calendarFsIcon");
+
+      function isCalendarFullscreen() {
+        const fsEl =
+          document.fullscreenElement ||
+          document.webkitFullscreenElement ||
+          document.msFullscreenElement;
+        return fsEl === calendarCardEl;
+      }
+
+      function updateCalendarFsIcon() {
+        const active = isCalendarFullscreen();
+        calendarFsIcon.innerHTML = active ? ICONS.compress : ICONS.expand;
+        calendarFsBtn.title = active
+          ? "Salir de pantalla completa"
+          : "Pantalla completa";
+      }
+      updateCalendarFsIcon();
+
+      calendarFsBtn.addEventListener("click", () => {
+        if (!isCalendarFullscreen()) {
+          const req =
+            calendarCardEl.requestFullscreen ||
+            calendarCardEl.webkitRequestFullscreen ||
+            calendarCardEl.msRequestFullscreen;
+          if (req) {
+            req.call(calendarCardEl);
+          } else {
+            // Sin soporte de Fullscreen API (ej. Safari iOS viejo): usamos
+            // una clase CSS que expande el modal a todo el viewport.
+            calendarCardEl.classList.toggle("cal-fs-fallback");
+            updateCalendarFsIcon();
+          }
+        } else {
+          const exit =
+            document.exitFullscreen ||
+            document.webkitExitFullscreen ||
+            document.msExitFullscreen;
+          if (exit) exit.call(document);
+        }
+        sndTick();
+      });
+
+      ["fullscreenchange", "webkitfullscreenchange", "msfullscreenchange"].forEach(
+        (evt) => document.addEventListener(evt, updateCalendarFsIcon),
+      );
+
       document
         .getElementById("calendarPdfBtn")
         .addEventListener("click", () => {
@@ -1796,10 +2247,37 @@
             );
             return;
           }
-          downloadCalendarPdf();
+          document.getElementById("pdfColorModeModal").style.display = "flex";
         });
 
-      function downloadCalendarPdf() {
+      document
+        .getElementById("pdfColorModeColorBtn")
+        .addEventListener("click", () => {
+          document.getElementById("pdfColorModeModal").style.display = "none";
+          downloadCalendarPdf(false);
+        });
+
+      document
+        .getElementById("pdfColorModeBwBtn")
+        .addEventListener("click", () => {
+          document.getElementById("pdfColorModeModal").style.display = "none";
+          downloadCalendarPdf(true);
+        });
+
+      document
+        .getElementById("pdfColorModeCancelBtn")
+        .addEventListener("click", () => {
+          document.getElementById("pdfColorModeModal").style.display = "none";
+        });
+
+      document
+        .getElementById("pdfColorModeModal")
+        .addEventListener("click", (e) => {
+          if (e.target.id === "pdfColorModeModal")
+            document.getElementById("pdfColorModeModal").style.display = "none";
+        });
+
+      function downloadCalendarPdf(blackAndWhite) {
         const source = document.createElement("div");
         source.className = "pdf-export-root";
 
@@ -1811,6 +2289,79 @@
         const gridClone = document
           .getElementById("calendarGridWrap")
           .cloneNode(true);
+        // Igual que con .cal-day-col, el wrap trae max-height:55vh y
+        // overflow-y:auto pensados para la vista en pantalla (con scroll).
+        // En el PDF eso corta el calendario a la altura del viewport en vez
+        // de mostrarlo completo: lo neutralizamos también acá.
+        gridClone.style.maxHeight = "none";
+        gridClone.style.overflow = "visible";
+
+        // El calendario en pantalla ubica cada materia con position:absolute
+        // y una altura proporcional a su duración real, calculada para que
+        // encaje en la franja horaria del día. Los títulos largos que pasan
+        // a más de una línea (ver .pdf-export-root .cal-block b) pueden
+        // superar esa altura fija y superponerse con el bloque de abajo.
+        // Para el PDF no necesitamos que la altura sea proporcional a la
+        // hora real: reordenamos cada columna de día como una lista vertical
+        // apilada (sin position:absolute), así cada tarjeta ocupa el alto
+        // que necesite y nunca se pisa con la siguiente.
+        gridClone.querySelectorAll(".cal-grid").forEach((g) => {
+          g.style.alignItems = "start";
+        });
+        gridClone.querySelectorAll(".cal-day-col").forEach((col) => {
+          const blocks = Array.from(col.querySelectorAll(".cal-block"));
+          blocks.sort(
+            (a, b) => parseFloat(a.style.top || 0) - parseFloat(b.style.top || 0),
+          );
+          col.style.height = "auto";
+          col.style.maxHeight = "none";
+          col.style.display = "flex";
+          col.style.flexDirection = "column";
+          col.style.gap = "6px";
+          col.style.padding = "6px";
+          blocks.forEach((block) => {
+            block.style.position = "static";
+            block.style.top = "";
+            block.style.left = "";
+            block.style.width = "100%";
+            block.style.height = "auto";
+            block.style.marginBottom = "0";
+
+            // El fondo de cada tarjeta viene con muy poca opacidad (0.13),
+            // pensado para verse sobre el fondo oscuro de la app. El PDF
+            // se genera siempre sobre fondo blanco (wrapper.style.background
+            // = "#ffffff"), y con esa opacidad tan baja el color prácticamente
+            // no se ve ahí: por eso el PDF sale "todo blanco". Repintamos
+            // cada tarjeta con una opacidad mayor, calibrada para fondo claro.
+            const borderColor = block.style.borderColor;
+            let rgb = null;
+            if (borderColor) {
+              // El navegador normaliza border-color a "rgb(r, g, b)" al
+              // leerlo desde style, tanto si se seteó como hex o como rgb.
+              const rgbMatch = borderColor.match(
+                /rgba?\((\d+),\s*(\d+),\s*(\d+)/,
+              );
+              if (rgbMatch) {
+                rgb = rgbMatch.slice(1, 4).map((v) => parseInt(v, 10));
+              }
+            }
+            if (rgb) {
+              const [r, g, b] = rgb;
+              block.style.background = `rgba(${r}, ${g}, ${b}, 0.22)`;
+              block.style.borderWidth = "1.5px";
+              const strong = block.querySelector("b");
+              if (strong) {
+                // Oscurecemos el color del título para que tenga contraste
+                // suficiente sobre el fondo blanco del PDF.
+                const darken = (v) => Math.round(v * 0.65);
+                strong.style.color = `rgb(${darken(r)}, ${darken(g)}, ${darken(b)})`;
+              }
+            }
+
+            col.appendChild(block);
+          });
+        });
+
         source.appendChild(gridClone);
 
         const noScheduleClone = document
@@ -1818,14 +2369,6 @@
           .cloneNode(true);
         if (noScheduleClone.innerHTML.trim())
           source.appendChild(noScheduleClone);
-
-        const listClone = document
-          .getElementById("calendarList")
-          .cloneNode(true);
-        listClone
-          .querySelectorAll(".cal-remove-btn")
-          .forEach((b) => b.remove());
-        source.appendChild(listClone);
 
         const wrapper = document.createElement("div");
         wrapper.style.position = "fixed";
@@ -1863,11 +2406,87 @@
         html2pdf()
           .set(opt)
           .from(source)
+          .toCanvas()
+          .then(function () {
+            if (blackAndWhite) {
+              const canvas = this.prop.canvas;
+              const ctx = canvas.getContext("2d");
+              const imgData = ctx.getImageData(
+                0,
+                0,
+                canvas.width,
+                canvas.height,
+              );
+              const d = imgData.data;
+              for (let i = 0; i < d.length; i += 4) {
+                const gray =
+                  d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+                d[i] = d[i + 1] = d[i + 2] = gray;
+              }
+              ctx.putImageData(imgData, 0, 0);
+            }
+          })
+          .toPdf()
+          .then(function () {
+            // Reconstruimos el PDF manualmente para forzar que la imagen
+            // arranque siempre pegada arriba (margin) en vez de quedar
+            // centrada verticalmente, que es lo que hacía html2pdf por defecto.
+            // Si algo de esto falla, no rompemos la descarga: seguimos con
+            // el PDF que ya había armado html2pdf por su cuenta.
+            try {
+              const canvas = this.prop.canvas;
+              const imgData = canvas.toDataURL("image/jpeg", 0.98);
+              const JsPdfCtor =
+                (window.jspdf && window.jspdf.jsPDF) ||
+                this.prop.pdf.constructor;
+              const margin = 10;
+
+              const newPdf = new JsPdfCtor({
+                unit: "mm",
+                format: "a4",
+                orientation: "landscape",
+              });
+
+              const pageWidth = newPdf.internal.pageSize.getWidth();
+              const pageHeight = newPdf.internal.pageSize.getHeight();
+              const imgWidth = pageWidth - margin * 2;
+              const usableHeight = pageHeight - margin * 2;
+              const imgHeightRaw = (canvas.height * imgWidth) / canvas.width;
+              const imgHeight = Math.min(imgHeightRaw, usableHeight);
+
+              let heightLeft = imgHeight;
+              let position = 0;
+              let firstPage = true;
+
+            while (heightLeft > 0.5) {
+  if (!firstPage) newPdf.addPage();
+  newPdf.addImage(
+    imgData,
+    "JPEG",
+    margin,
+    margin - position,
+    imgWidth,
+    imgHeight,
+  );
+  heightLeft -= usableHeight;
+  position += usableHeight;
+  firstPage = false;
+}
+
+              this.prop.pdf = newPdf;
+            } catch (err) {
+              console.error(
+                "No se pudo reacomodar el PDF arriba, se usa el original:",
+                err,
+              );
+            }
+          })
           .save()
           .then(() => {
             document.body.removeChild(wrapper);
           })
-          .catch(() => {
+          .catch((err) => {
+            console.error("Error generando el PDF:", err);
             document.body.removeChild(wrapper);
             showToast("error", "No se pudo generar el PDF.");
           });
@@ -2122,12 +2741,14 @@
             <div class="cs-line cs-muted">Sin días/horarios informados.</div>
           </div>`;
           } else {
-            const lines = flatDayRows.map((d) => {
-              let line = `${d.dia} ${d.startHour && d.endHour ? `${d.startHour} - ${d.endHour}` : d.startHour || "-"}`;
-              if (d.modalidad) line += ` (${d.modalidad})`;
-              if (d.aula) line += ` • ${d.aula}`;
-              return line;
-            });
+            const lines = flatDayRows
+              .filter((d) => !isAsincronica(d.modalidad))
+              .map((d) => {
+                let line = `${d.dia} ${d.startHour && d.endHour ? `${d.startHour} - ${d.endHour}` : d.startHour || "-"}`;
+                if (d.modalidad) line += ` (${d.modalidad})`;
+                if (d.aula) line += ` • ${d.aula}`;
+                return line;
+              });
             const obsSet = Array.from(
               new Set(flatDayRows.map((d) => d.observations).filter(Boolean)),
             );
@@ -2330,10 +2951,7 @@
         ref,
         push,
         set,
-        remove,
         onValue,
-        onDisconnect,
-        serverTimestamp,
         off,
       } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-database.js";
 
@@ -2352,66 +2970,7 @@
       const fbApp = initializeApp(firebaseConfig);
       const db = getDatabase(fbApp);
 
-      // ==================== PRESENCIA / USUARIOS CONECTADOS ====================
-      // Estrategia estándar de Firebase Realtime Database para contar clientes
-      // conectados en vivo, sin polling: cada pestaña crea un nodo propio bajo
-      // /presence/<id>. Al conectar, registramos onDisconnect().remove() ANTES
-      // de escribir nuestro propio nodo: si el server detecta la desconexión
-      // (cierre de pestaña, pérdida de red, crash del navegador, etc.) borra
-      // el nodo automáticamente del lado del servidor, sin que el cliente
-      // tenga que avisar nada. Escuchamos /presence completo con onValue y
-      // mostramos Object.keys(snapshot.val()).length -> eso ya es el conteo
-      // en tiempo real, actualizado apenas se conecta o desconecta cualquiera.
-      const presenceId =
-        Date.now().toString(36) + Math.random().toString(36).slice(2);
-      const myPresenceRef = ref(db, "presence/" + presenceId);
-      const presenceRootRef = ref(db, "presence");
-      const connectedInfoRef = ref(db, ".info/connected");
-
-      onValue(connectedInfoRef, (snap) => {
-        if (snap.val() === true) {
-          // Si se corta la conexión (o se cierra la pestaña), Firebase borra
-          // este nodo del lado del servidor automáticamente.
-          onDisconnect(myPresenceRef)
-            .remove()
-            .then(() => {
-              set(myPresenceRef, { connectedAt: serverTimestamp() });
-            });
-        }
-      });
-
-      const statusTextEl = document.getElementById("statusText");
-      let lastOnlineCount = null;
-
-      function renderConnectedLabel() {
-        if (!statusTextEl) return;
-        // Sólo agregamos el número si el texto actual es exactamente
-        // "Conectado" (estado real de conexión al backend) o ya tiene
-        // el número puesto por nosotros. Si dice "Conectando..." o
-        // "Error de conexión" no lo tocamos.
-        const txt = statusTextEl.textContent || "";
-        const isConnectedBase = txt === "Conectado";
-        const isConnectedWithCount = /^Conectado \(\d+\)$/.test(txt);
-        if (!isConnectedBase && !isConnectedWithCount) return;
-        if (lastOnlineCount === null) return;
-        statusTextEl.textContent = `Conectado (${lastOnlineCount})`;
-      }
-
-      onValue(presenceRootRef, (snapshot) => {
-        const val = snapshot.val();
-        lastOnlineCount = val ? Object.keys(val).length : 0;
-        renderConnectedLabel();
-      });
-
-      // El script original (no-module) es el que pone "Conectado" en
-      // statusText tras cargar los datos del backend. Como corre antes
-      // que este módulo y puede volver a escribir ese texto más adelante
-      // (reintentos, refrescos, etc.), chequeamos periódicamente si el
-      // texto pasó a "Conectado" para agregarle el número. Es liviano
-      // (una comparación de string cada 500ms) y no interfiere con nada.
-      setInterval(renderConnectedLabel, 500);
-
-      const BASE_URL = "";
+      const BASE_URL = "http://127.0.0.1:8000";
 
       let currentTeacherId = null;
       let currentCommentsRef = null;
