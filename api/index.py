@@ -9,12 +9,9 @@ Endpoints:
   GET  /api/test
 """
 
-import hashlib
 import json
-import os
 import re
 import time
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
@@ -33,200 +30,6 @@ app.add_middleware(
 )
 
 DEFAULT_HEADERS = {"User-Agent": "Mozilla/5.0"}
-
-# ==================== RESPALDO EN UPSTASH REDIS (REST API) ====================
-# Idea: cada vez que conseguimos datos reales (materias u horarios) desde
-# la página oficial, los guardamos en Upstash Redis. Si en un pedido futuro
-# la página oficial falla (timeout, caída, cambio de formato, etc.), en vez
-# de devolver un array vacío usamos lo último que tengamos guardado para
-# esa misma consulta, avisando al frontend con "fromCache": true.
-#
-# Por qué Redis y no un archivo local: en Vercel las funciones corren en un
-# filesystem de solo lectura (salvo /tmp, que es efímero y se borra en cada
-# cold start / redeploy). Upstash Redis es un almacenamiento persistente al
-# que se accede por HTTP, así que sobrevive a reinicios, redeploys y a que
-# haya varias instancias de la función corriendo en paralelo.
-#
-# Guardamos una key de Redis por entrada (no todo en un JSON gigante), con
-# este esquema de nombres:
-#   materias:<carrerId>   -> {"data": [...], "updatedAt": "..."}
-#   horarios:<hash>       -> {"data": [...], "updatedAt": "..."}
-#   period:current        -> {"value": 11,   "updatedAt": "..."}
-UPSTASH_REDIS_REST_URL = os.environ.get(
-    "UPSTASH_REDIS_REST_URL", "").rstrip("/")
-UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
-
-_UPSTASH_HEADERS = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _backup_configured() -> bool:
-    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
-        print(
-            "⚠ UPSTASH_REDIS_REST_URL/TOKEN no configuradas: el respaldo está desactivado.")
-        return False
-    return True
-
-
-async def backup_set(section: str, key: str, data: Any) -> None:
-    """Guarda datos frescos en Redis (sección 'materias' u 'horarios')."""
-    if not _backup_configured():
-        return
-    redis_key = f"{section}:{key}"
-    value = json.dumps(
-        {"data": data, "updatedAt": _now_iso()}, ensure_ascii=False)
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.post(
-                f"{UPSTASH_REDIS_REST_URL}/set/{redis_key}",
-                headers=_UPSTASH_HEADERS,
-                content=value.encode("utf-8"),
-            )
-            resp.raise_for_status()
-    except Exception as err:
-        # Si Redis falla al GUARDAR no queremos romper la respuesta al
-        # usuario: sólo lo logueamos y seguimos.
-        print(f"⚠ No se pudo guardar respaldo en Redis ({redis_key}): {err}")
-
-
-async def backup_get(section: str, key: str) -> Optional[dict[str, Any]]:
-    """Lee una entrada puntual del respaldo en Redis, o None si no existe/falla."""
-    if not _backup_configured():
-        return None
-    redis_key = f"{section}:{key}"
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(
-                f"{UPSTASH_REDIS_REST_URL}/get/{redis_key}",
-                headers=_UPSTASH_HEADERS,
-            )
-            resp.raise_for_status()
-            body = resp.json()
-    except Exception as err:
-        print(f"⚠ No se pudo leer respaldo en Redis ({redis_key}): {err}")
-        return None
-
-    raw_value = body.get("result")
-    if raw_value is None:
-        return None
-    try:
-        return json.loads(raw_value)
-    except Exception as err:
-        print(f"⚠ Respaldo en Redis con formato inválido ({redis_key}): {err}")
-        return None
-
-
-async def backup_set_period(period: int) -> None:
-    await backup_set("period", "current", period)
-
-
-async def backup_get_period() -> Optional[int]:
-    entry = await backup_get("period", "current")
-    if isinstance(entry, dict):
-        return entry.get("data")
-    return None
-
-
-def _build_horarios_cache_key(payload: Any) -> str:
-    """
-    Genera una clave estable para un pedido de horarios, a partir de
-    instituteId/subjectId/careerId (ignora academicPeriodId a propósito,
-    así el respaldo sigue siendo válido aunque cambie el período vigente).
-    """
-    items = payload if isinstance(payload, list) else [payload]
-    normalized = sorted(
-        (
-            item.get("instituteId"),
-            item.get("subjectId"),
-            item.get("careerId"),
-        )
-        for item in items
-        if isinstance(item, dict)
-    )
-    raw = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
-    return hashlib.md5(raw.encode("utf-8")).hexdigest()
-
-
-# ---------------- DETECCIÓN AUTOMÁTICA DEL PERÍODO ACADÉMICO ----------------
-# En vez de hardcodear academicPeriodId (5, 6, 11...) y tener que ir
-# cambiándolo a mano cada vez que la UNAJ pasa de período, lo detectamos
-# pegándole a la propia página oficial (sin fijar período) y buscando qué
-# academicPeriodId aparece en su respuesta. Se cachea un rato para no
-# pegarle a la página oficial en cada request de un usuario.
-PERIOD_CACHE_TTL_SECONDS = 60 * 60  # 1 hora
-_period_cache: dict[str, Any] = {"value": None, "ts": 0.0}
-
-
-async def _detect_current_period() -> Optional[int]:
-    """
-    Pega contra la página oficial sin fijar academicPeriodId y junta todas
-    las apariciones de "academicPeriodId": N en la respuesta. Asumimos que
-    el período vigente es el más alto (los IDs son incrementales), ya que
-    la propia página arma sus componentes/props con el período activo.
-    """
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-        try:
-            resp = await client.get(
-                "https://oferta-academica.espacios.unaj.edu.ar/",
-                headers={"Accept": "text/x-component",
-                         "RSC": "1", **DEFAULT_HEADERS},
-            )
-            raw = resp.text or ""
-        except Exception as err:
-            print(f"⚠ Error detectando período académico: {err}")
-            return None
-
-    matches = re.findall(r'"?academicPeriodId"?\s*:\s*(\d+)', raw)
-    if not matches:
-        print("⚠ No se encontró academicPeriodId en la página oficial.")
-        return None
-
-    detected = max(int(m) for m in matches)
-    print(f"✓ Período académico detectado: {detected}")
-    return detected
-
-
-async def get_current_period(force_refresh: bool = False) -> int:
-    """
-    Devuelve el academicPeriodId vigente, usando cache en memoria.
-    Si la detección falla, reusa el último valor cacheado (aunque esté
-    vencido) antes de caer a un valor fijo de emergencia.
-    """
-    now = time.time()
-    cached = _period_cache["value"]
-    fresh = cached is not None and (
-        now - _period_cache["ts"]) < PERIOD_CACHE_TTL_SECONDS
-
-    if fresh and not force_refresh:
-        return cached
-
-    detected = await _detect_current_period()
-    if detected is not None:
-        _period_cache["value"] = detected
-        _period_cache["ts"] = now
-        await backup_set_period(detected)
-        return detected
-
-    if cached is not None:
-        print(f"  → usando valor cacheado en memoria: {cached}")
-        return cached
-
-    # Sin detección y sin cache en memoria (p. ej. el server se acaba de
-    # reiniciar): probamos con el último valor que quedó guardado en el
-    # JSON de respaldo antes de recurrir al valor fijo de emergencia.
-    backed_up = await backup_get_period()
-    if backed_up is not None:
-        print(
-            f"  → sin detección ni cache en memoria, usando respaldo JSON: {backed_up}")
-        _period_cache["value"] = backed_up
-        _period_cache["ts"] = now
-        return backed_up
-
-    print("  → sin detección, sin cache ni respaldo, usando valor de emergencia: 11")
-    return 11
 
 # ---------------- RATE LIMIT DE COMENTARIOS (en memoria) ----------------
 # ADVERTENCIA: esto vive en memoria del proceso. Si corrés varias instancias
@@ -371,7 +174,6 @@ async def get_materias(carrer_id: str):
     PAGE_SIZE = 10
     MAX_PAGES = 60  # tope de seguridad
     offset = 0
-    period = await get_current_period()
 
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
         for _ in range(MAX_PAGES):
@@ -379,7 +181,7 @@ async def get_materias(carrer_id: str):
                 resp = await client.get(
                     "https://oferta-academica.espacios.unaj.edu.ar/",
                     params={
-                        "academicPeriodId": period,
+                        "academicPeriodId": 5,
                         "limit": PAGE_SIZE,
                         "sortField": "name",
                         "sortDirection": "asc",
@@ -434,7 +236,6 @@ async def get_materias(carrer_id: str):
     if len(all_items) > 0:
         print(
             f"  ✓✓ TOTAL FINAL: {len(all_items)} materias para carrera {carrer_id}")
-        await backup_set("materias", carrer_id, all_items)
         return all_items
 
     print("  ⚠ Paginación por offset no devolvió nada. Probando siusync directo...")
@@ -447,15 +248,14 @@ async def get_materias(carrer_id: str):
                 params={
                     "carrerId": carrer_id,
                     "Limit": 200,
-                    "AcademicPeriodId": period,
+                    "AcademicPeriodId": 6,
                     "sortField": "name",
                     "sortDirection": "asc",
                 },
                 headers=DEFAULT_HEADERS,
             )
             data = resp.json()
-            if isinstance(data, dict) and isinstance(data.get("items"), list) and data["items"]:
-                await backup_set("materias", carrer_id, data["items"])
+            if isinstance(data, dict) and isinstance(data.get("items"), list):
                 return data["items"]
         except Exception as err:
             print(f"  ⚠ Error siusync: {err}")
@@ -501,7 +301,6 @@ async def get_materias(carrer_id: str):
                                 parsed[0].get("subjectId") or parsed[0].get(
                                     "name") or parsed[0].get("code")
                             ):
-                                await backup_set("materias", carrer_id, parsed)
                                 return parsed
                         except Exception:
                             pass
@@ -509,8 +308,7 @@ async def get_materias(carrer_id: str):
                 if found:
                     try:
                         materias = json.loads(found)
-                        if isinstance(materias, list) and materias:
-                            await backup_set("materias", carrer_id, materias)
+                        if isinstance(materias, list):
                             return materias
                     except Exception:
                         pass
@@ -529,25 +327,11 @@ async def get_materias(carrer_id: str):
                         }
                         for idx, p in enumerate(parsed_from_html)
                     ]
-                    await backup_set("materias", carrer_id, mapped)
                     return mapped
             except Exception:
                 pass
 
-    # 4) ÚLTIMA OPCIÓN: si la página oficial no devolvió nada usable por
-    #    ninguna vía, usamos el último resultado bueno que hayamos guardado
-    #    en el JSON de respaldo local para esta carrera.
-    backed_up = await backup_get("materias", carrer_id)
-    if backed_up:
-        print(f"  → usando respaldo JSON local para carrera {carrer_id} "
-              f"(guardado el {backed_up['updatedAt']})")
-        return {
-            "items": backed_up["data"],
-            "fromCache": True,
-            "cachedAt": backed_up["updatedAt"],
-        }
-
-    print("  ❌ Ninguna variante extrajo materias y no hay respaldo. Enviando [] como fallback.")
+    print("  ❌ Ninguna variante extrajo materias. Enviando [] como fallback.")
     return []
 
 # ==================== RUTA: HORARIOS ====================
@@ -555,23 +339,8 @@ async def get_materias(carrer_id: str):
 
 @app.post("/api/horarios")
 async def get_horarios(request: Request):
-    payload = await request.json()
-
-    # Clave estable para este pedido (institute+subject+career), usada
-    # tanto para guardar como para buscar en el respaldo JSON local.
-    cache_key = _build_horarios_cache_key(payload)
-
     try:
-        # Pisamos el academicPeriodId que venga del frontend con el
-        # detectado automáticamente, así el HTML nunca necesita saber
-        # cuál es el período vigente ni hace falta tocarlo a mano.
-        period = await get_current_period()
-        if isinstance(payload, list):
-            for item in payload:
-                if isinstance(item, dict):
-                    item["academicPeriodId"] = period
-        elif isinstance(payload, dict):
-            payload["academicPeriodId"] = period
+        payload = await request.json()
 
         # IMPORTANTE: mantené este hash actualizado si la web original lo cambia
         NEXT_ACTION = "4089e22bca8943bcf018b9b5d8177263d5f601e6dd"
@@ -627,43 +396,20 @@ async def get_horarios(request: Request):
                         "buildingName": item.get("building"),
                         "headquarterName": item.get("headquarter"),
                         "observations": item.get("observations"),
-                        # Este fallback (parseo manual de tabla HTML) no
-                        # tiene forma de saber si el aula está confirmada o
-                        # no. En vez de dejar el campo ausente (lo que el
-                        # frontend interpreta como "sí está asignada" y
-                        # muestra el aula), declaramos explícitamente que
-                        # no sabemos, para que se muestre "Aula sin
-                        # asignar" en lugar de arriesgar un dato incorrecto.
-                        "assignament": {"id": None, "description": "No asignada"},
                         "raw": item,
                     }
                     for item in parsed_from_html
                 ]
 
         if not isinstance(commissions_json, list):
-            commissions_json = []
-
-        if commissions_json:
-            # Sólo pisamos el respaldo cuando conseguimos datos reales;
-            # un resultado vacío legítimo (materia sin comisiones) no
-            # borra lo último bueno que teníamos guardado.
-            await backup_set("horarios", cache_key, commissions_json)
+            return []
 
         # Devolvemos el JSON original completo (sin aplanar)
         return commissions_json
 
     except Exception as error:
-        print(f"❌ Error en /api/horarios, se intentará usar respaldo: {error}")
-        backed_up = await backup_get("horarios", cache_key)
-        if backed_up:
-            print(
-                f"  → usando respaldo JSON local (guardado el {backed_up['updatedAt']})")
-            return {
-                "items": backed_up["data"],
-                "fromCache": True,
-                "cachedAt": backed_up["updatedAt"],
-            }
-        return JSONResponse(status_code=500, content={"error": "Error interno extrayendo horarios y no hay respaldo disponible"})
+        print(f"❌ Error en /api/horarios: {error}")
+        return JSONResponse(status_code=500, content={"error": "Error interno extrayendo horarios"})
 
 
 # ==================== RUTA: RATE LIMIT DE COMENTARIOS ====================
@@ -693,73 +439,8 @@ async def check_comment_rate_limit(request: Request):
     return {"allowed": True}
 
 
-# ==================== RUTA: PERÍODO ACADÉMICO ====================
-
-@app.get("/api/period")
-async def get_period(refresh: bool = False):
-    """
-    Devuelve el academicPeriodId que el backend está usando actualmente.
-    Pasar ?refresh=true fuerza volver a detectarlo contra la página oficial
-    (ignorando el cache) — útil para chequear a mano si cambió.
-    """
-    period = await get_current_period(force_refresh=refresh)
-    return {"academicPeriodId": period, "cachedAt": _period_cache["ts"]}
-
-
 # ==================== RUTA: TEST ====================
 
 @app.get("/api/test")
 async def test():
     return "SERVIDOR FUNCIONANDO (FastAPI)"
-
-
-# ==================== RUTA: ESTADO DEL RESPALDO ====================
-
-@app.get("/api/backup-status")
-async def backup_status():
-    """
-    Info de diagnóstico: qué hay guardado en el respaldo de Upstash Redis
-    (carreras con materias guardadas, cantidad de combos de horarios
-    guardados, y período académico respaldado). No expone los datos
-    completos, sólo un resumen, para no volver la respuesta gigante.
-    """
-    if not _backup_configured():
-        return {
-            "configured": False,
-            "detail": "Faltan las variables de entorno UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN.",
-        }
-
-    async def _keys(pattern: str) -> list[str]:
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(
-                    f"{UPSTASH_REDIS_REST_URL}/keys/{pattern}",
-                    headers=_UPSTASH_HEADERS,
-                )
-                resp.raise_for_status()
-                return resp.json().get("result", []) or []
-        except Exception as err:
-            print(f"⚠ Error listando keys de Redis ({pattern}): {err}")
-            return []
-
-    materias_keys = await _keys("materias:*")
-    horarios_keys = await _keys("horarios:*")
-
-    materias_resumen = {}
-    for k in materias_keys:
-        carrer_id = k.split(":", 1)[1] if ":" in k else k
-        entry = await backup_get("materias", carrer_id)
-        if entry:
-            materias_resumen[carrer_id] = {
-                "cantidad": len(entry.get("data", []) or []),
-                "updatedAt": entry.get("updatedAt"),
-            }
-
-    period_entry = await backup_get("period", "current")
-
-    return {
-        "configured": True,
-        "materias": materias_resumen,
-        "horariosGuardados": len(horarios_keys),
-        "period": period_entry,
-    }
