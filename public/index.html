@@ -228,7 +228,7 @@
         gap: 10px;
       }
       .teacher-search-result-item {
-        padding: 10px 12px;
+        padding: 12px 14px;
         border-radius: 10px;
         background: var(--card-bg);
         border: 1px solid var(--line);
@@ -236,28 +236,47 @@
       .teacher-search-result-name {
         font-size: 0.95rem;
         font-weight: 700;
-        margin-bottom: 6px;
+        margin-bottom: 8px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+        color: #6e9eff;
       }
       .teacher-search-result-subject {
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        align-items: baseline;
-        padding: 3px 0;
+        padding: 8px 0;
         font-size: 0.85rem;
         border-bottom: 1px solid var(--line);
       }
       .teacher-search-result-subject:last-child {
         border-bottom: none;
       }
-      .teacher-search-result-subject .comision-name {
-        opacity: 0.75;
-        font-size: 0.8rem;
+      .teacher-search-result-subject-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .teacher-search-result-subject-name {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .teacher-search-result-comisiones {
+        display: block;
+        margin-top: 3px;
+        opacity: 0.65;
+        font-size: 0.78rem;
+        font-weight: 400;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .teacher-search-result-comision-line {
+        display: block;
       }
       .teacher-search-result-role {
         font-size: 0.72rem;
         opacity: 0.7;
+        color: var(--muted);
         font-family: "JetBrains Mono", monospace;
+        white-space: nowrap;
       }
 
       /* Botón flotante "volver arriba" dentro de la lista de materias */
@@ -606,7 +625,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
-      const BASE_URL = "";
+      const BASE_URL = "http://127.0.0.1:8000";
 
       /* ---------------- CATÁLOGO DE INSTITUTOS Y CARRERAS ---------------- */
       // Estructura declarada explícitamente a partir de los datos provistos.
@@ -3133,7 +3152,10 @@
         statusEl.style.display = "block";
         statusEl.textContent = "Buscando en todas las materias, puede tardar unos segundos...";
 
-        const BATCH_SIZE = 8;
+        // Concurrencia moderada: suficiente para acelerar bastante la
+        // búsqueda sin bombardear el backend de golpe con las ~500+
+        // materias del catálogo completo.
+        const BATCH_SIZE = 20;
         const matchesByTeacher = new Map();
 
         for (let i = 0; i < allSubjects.length; i += BATCH_SIZE) {
@@ -3212,14 +3234,22 @@
           .map((teacher) => {
             const subjectRows = Array.from(teacher.subjects.values())
               .map((s) => {
-                const comisionesTxt = s.comisiones.map((c) => c.name).join(", ");
+                const comisionesTxt = s.comisiones
+                  .map(
+                    (c) =>
+                      `<span class="teacher-search-result-comision-line">${escapeHtml(c.name)}</span>`,
+                  )
+                  .join("");
                 const rolesTxt = Array.from(
                   new Set(s.comisiones.map((c) => c.role).filter(Boolean)),
                 ).join(" / ");
                 return `
                   <div class="teacher-search-result-subject">
-                    <span>${escapeHtml(s.subjectName)} <span class="comision-name">(${escapeHtml(comisionesTxt)})</span></span>
-                    ${rolesTxt ? `<span class="teacher-search-result-role">${escapeHtml(rolesTxt)}</span>` : ""}
+                    <div class="teacher-search-result-subject-head">
+                      <span class="teacher-search-result-subject-name">${escapeHtml(s.subjectName)}</span>
+                      ${rolesTxt ? `<span class="teacher-search-result-role">${escapeHtml(rolesTxt)}</span>` : ""}
+                    </div>
+                    <span class="teacher-search-result-comisiones">${comisionesTxt}</span>
                   </div>`;
               })
               .join("");
@@ -3379,7 +3409,7 @@
       const fbApp = initializeApp(firebaseConfig);
       const db = getDatabase(fbApp);
 
-      const BASE_URL = "";
+      const BASE_URL = "http://127.0.0.1:8000";
 
       let currentTeacherId = null;
       let currentCommentsRef = null;
