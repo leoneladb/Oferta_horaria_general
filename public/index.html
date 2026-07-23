@@ -3145,6 +3145,25 @@
         if (allSubjects.length === 0) {
           statusEl.style.display = "block";
           statusEl.textContent = "Todavía se está cargando el catálogo de materias, esperá un momento...";
+          // Reintentamos solos cuando el catálogo termine de cargar, en vez
+          // de dejar el mensaje "esperá un momento" colgado para siempre.
+          const waitStartedAt = Date.now();
+          const waitForCatalog = setInterval(() => {
+            if (myToken !== teacherSearchToken) {
+              clearInterval(waitForCatalog);
+              return;
+            }
+            if (allSubjects.length > 0) {
+              clearInterval(waitForCatalog);
+              runTeacherSearch(query);
+              return;
+            }
+            if (Date.now() - waitStartedAt > 20000) {
+              clearInterval(waitForCatalog);
+              statusEl.textContent =
+                "No se pudo cargar el catálogo de materias. Cerrá y volvé a abrir la búsqueda, o recargá la página.";
+            }
+          }, 300);
           return;
         }
 
