@@ -194,6 +194,72 @@
         min-width: 160px;
       }
 
+      /* Buscador de profesor dentro de una materia abierta */
+      .subject-teacher-search-box {
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+      }
+      .subject-teacher-search-box .search-input {
+        width: 100%;
+      }
+      .subject-teacher-search-hint {
+        font-size: 0.78rem;
+        opacity: 0.75;
+        margin-top: 6px;
+      }
+      .comision-block.teacher-hidden {
+        display: none !important;
+      }
+
+      /* Modal "Buscar profesor" (búsqueda global) */
+      .teacher-search-card {
+        max-width: 560px;
+        width: 100%;
+      }
+      .teacher-search-results {
+        margin-top: 12px;
+        max-height: 55vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .teacher-search-result-item {
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--card-bg);
+        border: 1px solid var(--line);
+      }
+      .teacher-search-result-name {
+        font-size: 0.95rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .teacher-search-result-subject {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: baseline;
+        padding: 3px 0;
+        font-size: 0.85rem;
+        border-bottom: 1px solid var(--line);
+      }
+      .teacher-search-result-subject:last-child {
+        border-bottom: none;
+      }
+      .teacher-search-result-subject .comision-name {
+        opacity: 0.75;
+        font-size: 0.8rem;
+      }
+      .teacher-search-result-role {
+        font-size: 0.72rem;
+        opacity: 0.7;
+        font-family: "JetBrains Mono", monospace;
+      }
+
       /* Botón flotante "volver arriba" dentro de la lista de materias */
       .scroll-top-btn {
         position: fixed;
@@ -290,6 +356,11 @@
             <button class="menu-item" id="soundToggle" type="button" role="menuitem">
               <span class="icon" id="soundIcon"></span>
               <span class="menu-item-label" id="soundLabel">Sonido</span>
+            </button>
+
+            <button class="menu-item" id="teacherSearchToggle" type="button" role="menuitem">
+              <span class="icon" id="teacherSearchIcon"></span>
+              <span class="menu-item-label">Buscar profesor</span>
             </button>
 
             <div class="menu-divider"></div>
@@ -512,6 +583,24 @@
       </div>
     </div>
 
+    <div id="teacherSearchModal" class="modal-overlay">
+      <div class="modal-card teacher-search-card">
+        <h3>Buscar profesor</h3>
+        <input
+          id="teacherSearchInput"
+          class="search-input"
+          type="search"
+          autocomplete="off"
+          placeholder="Escribí el nombre del profesor..."
+        />
+        <div id="teacherSearchStatus" class="empty-hint" style="display: none"></div>
+        <div id="teacherSearchResults" class="teacher-search-results"></div>
+        <div class="modal-actions">
+          <button class="btn-modal cancel" id="teacherSearchCloseBtn">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
 
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
@@ -588,6 +677,11 @@
 
       let allSubjects = [];
       let selectedSubject = null;
+
+      // Cache de comisiones ya consultadas por materia, usado por el
+      // buscador global de "Buscar profesor" para no repetir fetches
+      // cada vez que se busca. Clave -> array de comisiones (items).
+      const comisionesCache = new Map();
 
       // Filtros activos
       let filterInstituteId = ""; // "" = todos
@@ -671,11 +765,16 @@
         moon: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M20.2 14.3C18.9 14.9 17.4 15.2 15.9 15C11.9 14.5 8.9 11 9.1 7C9.2 5.6 9.6 4.3 10.3 3.2C6.4 4 3.5 7.5 3.5 11.7C3.5 16.5 7.4 20.4 12.2 20.4C15.9 20.4 19 18.1 20.2 14.3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
     </svg>`,
+        teacher: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="8" r="3.4" stroke="currentColor" stroke-width="1.6"/>
+      <path d="M5 19.5C5 15.9 8.1 13 12 13C15.9 13 19 15.9 19 19.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    </svg>`,
       };
       document.getElementById("calendarIcon").innerHTML = ICONS.calendar;
       document.getElementById("linksIcon").innerHTML = ICONS.link;
       document.getElementById("menuIcon").innerHTML = ICONS.menu;
       document.getElementById("menuCaret").innerHTML = ICONS.chevronDown;
+      document.getElementById("teacherSearchIcon").innerHTML = ICONS.teacher;
 
       /* ---------------- MENÚ DESPLEGABLE DEL HEADER ---------------- */
       (function initHeaderMenu() {
@@ -1101,6 +1200,19 @@
         }
       }
 
+      // Clave única para cachear comisiones por materia (misma lógica que
+      // "selectSubject" usa para armar el payload de /api/horarios).
+      function subjectCacheKey(subject) {
+        const instituteId =
+          subject.instituteId ||
+          (subject.institute && subject.institute.id) ||
+          subject._instituteId ||
+          7;
+        const careerId =
+          (subject.carrer && subject.carrer.id) || subject._carrerId || null;
+        return `${subject.subjectId}|${instituteId}|${careerId}`;
+      }
+
       /* ---------------- RENDER LISTA (con búsqueda + filtros) ---------------- */
       function normalizeText(s) {
         return String(s || "")
@@ -1212,7 +1324,14 @@
       })();
 
       /* ---------------- SELECCIÓN DE MATERIA -> HORARIOS ---------------- */
+      // Token de selección: si el usuario cambia de materia mientras un
+      // fetch anterior todavía está en vuelo, esa respuesta vieja no debe
+      // pisar el render de la materia nueva (y menos el buscador de
+      // profesor, que quedaría atado a comisiones de otra materia).
+      let subjectSelectionToken = 0;
+
       async function selectSubject(subject, el) {
+        const myToken = ++subjectSelectionToken;
         sndSelect();
         document
           .querySelectorAll(".materia-item.active")
@@ -1272,10 +1391,12 @@
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           const items = Array.isArray(data) ? data : data.items || [];
+          if (myToken !== subjectSelectionToken) return; // el usuario ya cambió de materia
           renderCoordinatorBanner(findCoordinator(items));
           renderComisiones(items);
           sndSuccess();
         } catch (err) {
+          if (myToken !== subjectSelectionToken) return;
           mainBody.innerHTML = `<div class="error-line">Error al consultar comisiones: ${escapeHtml(err.message)}</div>`;
           sndError();
         }
@@ -2621,6 +2742,16 @@
       function renderComisiones(items) {
         const mainBody = document.getElementById("mainBody");
 
+        // Guardamos en cache las comisiones de esta materia para que el
+        // buscador global "Buscar profesor" del menú pueda reutilizarlas
+        // sin volver a pedirlas al backend.
+        if (selectedSubject) {
+          comisionesCache.set(
+            subjectCacheKey(selectedSubject),
+            { subject: selectedSubject, items: items || [] },
+          );
+        }
+
         if (!items || items.length === 0) {
           mainBody.innerHTML = `
         <div class="no-selection">
@@ -2631,6 +2762,22 @@
         }
 
         mainBody.innerHTML = "";
+
+        // Buscador de profesor dentro de la materia abierta: filtra los
+        // bloques de comisión ya renderizados por nombre de docente.
+        const searchBox = document.createElement("div");
+        searchBox.className = "subject-teacher-search-box";
+        searchBox.innerHTML = `
+          <input
+            id="subjectTeacherSearchInput"
+            class="search-input"
+            type="search"
+            autocomplete="off"
+            placeholder="Buscar profesor en esta materia..."
+          />
+          <div class="subject-teacher-search-hint" id="subjectTeacherSearchHint"></div>
+        `;
+        mainBody.appendChild(searchBox);
 
         items.forEach((com) => {
           const nombreComision =
@@ -2721,6 +2868,12 @@
 
           const block = document.createElement("div");
           block.className = "comision-block";
+          // Guardamos los nombres de todos los docentes de esta comisión
+          // (no solo el primaryTeacher) para poder filtrar por cualquiera
+          // de ellos con el buscador de profesor dentro de la materia.
+          block.dataset.teacherNames = normalizeText(
+            normalizedTeachers.map((t) => t.name).join(" | "),
+          );
 
           const head = document.createElement("div");
           head.className = "comision-block-head";
@@ -2833,6 +2986,42 @@
 
           mainBody.appendChild(block);
         });
+
+        // Conectamos el filtro en vivo del buscador de profesor local.
+        const subjectTeacherInput = document.getElementById(
+          "subjectTeacherSearchInput",
+        );
+        if (subjectTeacherInput) {
+          subjectTeacherInput.addEventListener("input", () => {
+            filterComisionesByTeacher(subjectTeacherInput.value);
+          });
+        }
+      }
+
+      // Filtra los bloques de comisión ya renderizados en #mainBody según
+      // el nombre de profesor tipeado (buscador local dentro de la materia).
+      function filterComisionesByTeacher(query) {
+        const q = normalizeText(query);
+        const blocks = document.querySelectorAll(
+          "#mainBody .comision-block",
+        );
+        let visibleCount = 0;
+        blocks.forEach((block) => {
+          const names = block.dataset.teacherNames || "";
+          const matches = !q || names.includes(q);
+          block.classList.toggle("teacher-hidden", !matches);
+          if (matches) visibleCount++;
+        });
+        const hint = document.getElementById("subjectTeacherSearchHint");
+        if (hint) {
+          if (!q) {
+            hint.textContent = "";
+          } else if (visibleCount === 0) {
+            hint.textContent = "Ningún docente coincide con esa búsqueda en esta materia.";
+          } else {
+            hint.textContent = `${visibleCount} comisión${visibleCount === 1 ? "" : "es"} con ese/a docente.`;
+          }
+        }
       }
 
       function escapeHtml(s) {
@@ -2865,6 +3054,226 @@
         toast.querySelector(".close").addEventListener("click", close);
         if (duration > 0) setTimeout(close, duration);
       }
+
+      /* ---------------- BUSCAR PROFESOR (búsqueda global, todas las materias) ---------------- */
+      let teacherSearchToken = 0;
+
+      async function fetchComisionesForSubject(subject) {
+        const key = subjectCacheKey(subject);
+        if (comisionesCache.has(key)) {
+          return comisionesCache.get(key).items;
+        }
+
+        const instituteId =
+          subject.instituteId ||
+          (subject.institute && subject.institute.id) ||
+          subject._instituteId ||
+          7;
+        const careerId =
+          (subject.carrer && subject.carrer.id) || subject._carrerId || null;
+
+        const payload = [
+          { instituteId: instituteId, subjectId: subject.subjectId, careerId: careerId },
+        ];
+
+        try {
+          const res = await fetch(`${BASE_URL}/api/horarios`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const items = Array.isArray(data) ? data : data.items || [];
+          comisionesCache.set(key, { subject, items });
+          return items;
+        } catch (err) {
+          comisionesCache.set(key, { subject, items: [] });
+          return [];
+        }
+      }
+
+      function extractTeachersFromComision(com) {
+        const teachers = Array.isArray(com.teachers) ? com.teachers : [];
+        return teachers
+          .map((t) => {
+            if (typeof t === "string") return { name: t, role: "" };
+            const name = t.teacherFullName || t.fullName || t.name || "";
+            const role =
+              t.teacherRoleName ||
+              t.teacherRoleDescription ||
+              t.role ||
+              t.roleName ||
+              "";
+            return { name, role };
+          })
+          .filter((t) => t.name);
+      }
+
+      async function runTeacherSearch(query) {
+        const myToken = ++teacherSearchToken;
+        const statusEl = document.getElementById("teacherSearchStatus");
+        const resultsEl = document.getElementById("teacherSearchResults");
+        const q = normalizeText(query);
+
+        if (!q) {
+          resultsEl.innerHTML = "";
+          statusEl.style.display = "block";
+          statusEl.textContent = "Escribí un nombre para buscar en qué materias da clase.";
+          return;
+        }
+
+        if (allSubjects.length === 0) {
+          statusEl.style.display = "block";
+          statusEl.textContent = "Todavía se está cargando el catálogo de materias, esperá un momento...";
+          return;
+        }
+
+        resultsEl.innerHTML = "";
+        statusEl.style.display = "block";
+        statusEl.textContent = "Buscando en todas las materias, puede tardar unos segundos...";
+
+        const BATCH_SIZE = 8;
+        const matchesByTeacher = new Map();
+
+        for (let i = 0; i < allSubjects.length; i += BATCH_SIZE) {
+          if (myToken !== teacherSearchToken) return;
+
+          const batch = allSubjects.slice(i, i + BATCH_SIZE);
+          const results = await Promise.all(
+            batch.map((subject) => fetchComisionesForSubject(subject)),
+          );
+
+          if (myToken !== teacherSearchToken) return;
+
+          batch.forEach((subject, idx) => {
+            const items = results[idx] || [];
+            items.forEach((com) => {
+              const teachers = extractTeachersFromComision(com);
+              teachers.forEach((t) => {
+                const normName = normalizeText(t.name);
+                if (!normName.includes(q)) return;
+
+                if (!matchesByTeacher.has(normName)) {
+                  matchesByTeacher.set(normName, {
+                    name: t.name,
+                    subjects: new Map(),
+                  });
+                }
+                const teacherEntry = matchesByTeacher.get(normName);
+                const subjectKey = `${subject.subjectId}|${subject._carrerId}`;
+                if (!teacherEntry.subjects.has(subjectKey)) {
+                  teacherEntry.subjects.set(subjectKey, {
+                    subjectName: subject.name || "Materia sin nombre",
+                    comisiones: [],
+                  });
+                }
+                const nombreComision =
+                  com.commissionName ||
+                  com.comisionName ||
+                  com.name ||
+                  com.comisionId ||
+                  "Comisión sin nombre";
+                teacherEntry.subjects.get(subjectKey).comisiones.push({
+                  name: nombreComision,
+                  role: t.role,
+                });
+              });
+            });
+          });
+
+          statusEl.textContent = `Buscando... (${Math.min(i + BATCH_SIZE, allSubjects.length)}/${allSubjects.length} materias revisadas)`;
+          renderTeacherSearchResults(matchesByTeacher);
+        }
+
+        if (myToken !== teacherSearchToken) return;
+
+        if (matchesByTeacher.size === 0) {
+          statusEl.style.display = "block";
+          statusEl.textContent = "No se encontró ningún docente con ese nombre.";
+        } else {
+          statusEl.style.display = "none";
+        }
+        renderTeacherSearchResults(matchesByTeacher);
+      }
+
+      function renderTeacherSearchResults(matchesByTeacher) {
+        const resultsEl = document.getElementById("teacherSearchResults");
+        if (!matchesByTeacher || matchesByTeacher.size === 0) {
+          resultsEl.innerHTML = "";
+          return;
+        }
+
+        const teacherEntries = Array.from(matchesByTeacher.values()).sort(
+          (a, b) => a.name.localeCompare(b.name, "es"),
+        );
+
+        resultsEl.innerHTML = teacherEntries
+          .map((teacher) => {
+            const subjectRows = Array.from(teacher.subjects.values())
+              .map((s) => {
+                const comisionesTxt = s.comisiones.map((c) => c.name).join(", ");
+                const rolesTxt = Array.from(
+                  new Set(s.comisiones.map((c) => c.role).filter(Boolean)),
+                ).join(" / ");
+                return `
+                  <div class="teacher-search-result-subject">
+                    <span>${escapeHtml(s.subjectName)} <span class="comision-name">(${escapeHtml(comisionesTxt)})</span></span>
+                    ${rolesTxt ? `<span class="teacher-search-result-role">${escapeHtml(rolesTxt)}</span>` : ""}
+                  </div>`;
+              })
+              .join("");
+            return `
+              <div class="teacher-search-result-item">
+                <div class="teacher-search-result-name">${escapeHtml(teacher.name)}</div>
+                ${subjectRows}
+              </div>`;
+          })
+          .join("");
+      }
+
+      let teacherSearchDebounceTimer = null;
+      function scheduleTeacherSearch(query) {
+        if (teacherSearchDebounceTimer) clearTimeout(teacherSearchDebounceTimer);
+        teacherSearchDebounceTimer = setTimeout(() => {
+          runTeacherSearch(query);
+        }, 350);
+      }
+
+      document
+        .getElementById("teacherSearchToggle")
+        .addEventListener("click", () => {
+          document.getElementById("teacherSearchModal").style.display = "flex";
+          sndTick();
+          const input = document.getElementById("teacherSearchInput");
+          input.value = "";
+          document.getElementById("teacherSearchResults").innerHTML = "";
+          const statusEl = document.getElementById("teacherSearchStatus");
+          statusEl.style.display = "block";
+          statusEl.textContent = "Escribí un nombre para buscar en qué materias da clase.";
+          setTimeout(() => input.focus(), 60);
+        });
+
+      document
+        .getElementById("teacherSearchInput")
+        .addEventListener("input", (e) => {
+          scheduleTeacherSearch(e.target.value);
+        });
+
+      document
+        .getElementById("teacherSearchCloseBtn")
+        .addEventListener("click", () => {
+          teacherSearchToken++;
+          document.getElementById("teacherSearchModal").style.display = "none";
+        });
+      document
+        .getElementById("teacherSearchModal")
+        .addEventListener("click", (e) => {
+          if (e.target.id === "teacherSearchModal") {
+            teacherSearchToken++;
+            document.getElementById("teacherSearchModal").style.display = "none";
+          }
+        });
 
       initFilters();
       loadAllSubjects();

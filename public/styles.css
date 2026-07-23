@@ -44,6 +44,9 @@ html[data-theme="light"] body::before {
 html[data-theme="light"] .brand h1 {
   color: #16213a;
 }
+html[data-theme="light"] .combo-dropdown{
+  background: #fff;
+}
 
 * { box-sizing: border-box; }
 
