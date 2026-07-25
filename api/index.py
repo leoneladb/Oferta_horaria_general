@@ -728,8 +728,28 @@ async def get_horarios(request: Request):
         # un resultado vacío legítimo (materia sin comisiones) no
         # borra lo último bueno que teníamos guardado.
         await backup_set("horarios", cache_key, commissions_json)
+        # Devolvemos el JSON original completo (sin aplanar)
+        return commissions_json
 
-    # Devolvemos el JSON original completo (sin aplanar)
+    # commissions_json vino vacío SIN que _fetch_horarios_live tirara
+    # excepción/timeout (p. ej. la UNAJ respondió pero cambió el formato,
+    # el Next-Action quedó desactualizado, o hubo un glitch de parseo).
+    # Antes esto se devolvía tal cual como [] y el frontend mostraba
+    # "Sin comisiones disponibles" aunque hubiera respaldo bueno guardado.
+    # Consultamos el respaldo también en este caso, no sólo cuando hay
+    # excepción, y sólo lo usamos si tiene datos (si el respaldo también
+    # está vacío o no existe, ahí sí es un [] legítimo).
+    backed_up = await backup_get("horarios", cache_key)
+    if backed_up and backed_up.get("data"):
+        print(
+            f"  → fetch en vivo devolvió vacío, usando respaldo (Upstash) "
+            f"(guardado el {backed_up['updatedAt']})")
+        return {
+            "items": backed_up["data"],
+            "fromCache": True,
+            "cachedAt": backed_up["updatedAt"],
+        }
+
     return commissions_json
 
 
