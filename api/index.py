@@ -76,7 +76,35 @@ _UPSTASH_HEADERS = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
 # esté colgado y pasamos directo al respaldo, garantizando que siempre
 # llegamos a esa parte a tiempo.
 LIVE_FETCH_BUDGET_SECONDS = float(
-    os.environ.get("LIVE_FETCH_BUDGET_SECONDS", "8"))
+    os.environ.get("LIVE_FETCH_BUDGET_SECONDS", "6"))
+
+# ==================== TECHO TOTAL POR REQUEST (fix del "a veces sí, a veces no") ====================
+# Problema real encontrado: LIVE_FETCH_BUDGET_SECONDS sólo acotaba el intento
+# en vivo, pero backup_get()/backup_set() tenían SU PROPIO timeout fijo de 8s
+# aparte, sin descontar lo ya gastado. En el peor caso (intento en vivo que
+# tarda los 8s completos + Redis que tarda otros tantos) la función podía
+# necesitar hasta 16s, muy por encima del límite de 10s de Vercel (plan
+# Hobby sin Fluid Compute). Vercel mataba la función a mitad de camino,
+# justo antes de devolver el respaldo, aunque el respaldo estuviera bien
+# guardado. De ahí la intermitencia: dependía de si la suma total alcanzaba
+# a entrar en los 10s o no.
+#
+# La solución: UN SOLO deadline total por request (TOTAL_REQUEST_BUDGET),
+# del que se va descontando el tiempo ya usado antes de llamar al respaldo.
+# Así el presupuesto para Redis se achica automáticamente si el intento en
+# vivo ya consumió tiempo, y la suma nunca puede superar el techo total.
+#
+# Si tu función en Vercel tiene un maxDuration distinto a 10s (por ejemplo
+# 60s con Fluid Compute o plan Pro), subí este valor por variable de entorno.
+TOTAL_REQUEST_BUDGET_SECONDS = float(
+    os.environ.get("TOTAL_REQUEST_BUDGET_SECONDS", "9"))
+
+
+def _remaining_budget(deadline: float, minimum: float = 0.5, maximum: float = 3.0) -> float:
+    """Tiempo que le queda al request antes del deadline total, acotado
+    entre `minimum` y `maximum` para no pedirle a Redis un timeout de 0s
+    (fallaría siempre) ni uno absurdamente largo."""
+    return max(minimum, min(maximum, deadline - time.monotonic()))
 
 
 def _now_iso() -> str:
@@ -91,7 +119,7 @@ def _backup_configured() -> bool:
     return True
 
 
-async def backup_set(section: str, key: str, data: Any) -> None:
+async def backup_set(section: str, key: str, data: Any, timeout: float = 3.0) -> None:
     """Guarda datos frescos en Redis (sección 'materias' u 'horarios')."""
     if not _backup_configured():
         return
@@ -99,7 +127,7 @@ async def backup_set(section: str, key: str, data: Any) -> None:
     value = json.dumps(
         {"data": data, "updatedAt": _now_iso()}, ensure_ascii=False)
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{UPSTASH_REDIS_REST_URL}/set/{redis_key}",
                 headers=_UPSTASH_HEADERS,
@@ -112,13 +140,13 @@ async def backup_set(section: str, key: str, data: Any) -> None:
         print(f"⚠ No se pudo guardar respaldo en Redis ({redis_key}): {err}")
 
 
-async def backup_get(section: str, key: str) -> Optional[dict[str, Any]]:
+async def backup_get(section: str, key: str, timeout: float = 3.0) -> Optional[dict[str, Any]]:
     """Lee una entrada puntual del respaldo en Redis, o None si no existe/falla."""
     if not _backup_configured():
         return None
     redis_key = f"{section}:{key}"
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(
                 f"{UPSTASH_REDIS_REST_URL}/get/{redis_key}",
                 headers=_UPSTASH_HEADERS,
@@ -565,9 +593,16 @@ async def _fetch_materias_live(carrer_id: str) -> Optional[list]:
 async def get_materias(carrer_id: str):
     print(f"→ /api/materias/{carrer_id} (inicio)")
 
+    # Deadline total del request: TODO lo que sigue (intento en vivo +
+    # lectura de respaldo) tiene que entrar acá, para no depender de que
+    # cada paso individual "adivine" bien su propio timeout.
+    deadline = time.monotonic() + TOTAL_REQUEST_BUDGET_SECONDS
+
     try:
         result = await asyncio.wait_for(
-            _fetch_materias_live(carrer_id), timeout=LIVE_FETCH_BUDGET_SECONDS
+            _fetch_materias_live(carrer_id),
+            timeout=min(LIVE_FETCH_BUDGET_SECONDS, _remaining_budget(
+                deadline, minimum=0.5, maximum=LIVE_FETCH_BUDGET_SECONDS)),
         )
     except Exception as err:
         kind = "timeout" if isinstance(
@@ -579,13 +614,23 @@ async def get_materias(carrer_id: str):
     if result:
         print(
             f"  ✓✓ TOTAL FINAL: {len(result)} materias para carrera {carrer_id}")
-        await backup_set("materias", carrer_id, result)
+        # OJO: en Vercel (serverless) el proceso puede congelarse apenas
+        # se devuelve la respuesta HTTP, así que un guardado "en segundo
+        # plano" (asyncio.create_task sin esperar) corre el riesgo real de
+        # quedar a mitad de hacer y nunca completarse. Por eso se espera
+        # acá, pero con un timeout acotado por lo que quede del deadline
+        # total, para no arriesgar el límite de tiempo de la función.
+        await backup_set("materias", carrer_id, result, timeout=_remaining_budget(deadline))
         return result
 
     # ÚLTIMA OPCIÓN: si la página oficial no devolvió nada usable por
     # ninguna vía (o se agotó el presupuesto de tiempo), usamos el último
     # resultado bueno que hayamos guardado en el respaldo de Upstash.
-    backed_up = await backup_get("materias", carrer_id)
+    # El timeout de esta lectura se achica solo según cuánto del deadline
+    # total ya se consumió arriba: así la suma nunca puede superar
+    # TOTAL_REQUEST_BUDGET_SECONDS, sin importar qué tan lento haya sido
+    # el intento en vivo.
+    backed_up = await backup_get("materias", carrer_id, timeout=_remaining_budget(deadline))
     if backed_up:
         print(f"  → usando respaldo (Upstash) para carrera {carrer_id} "
               f"(guardado el {backed_up['updatedAt']})")
@@ -702,17 +747,20 @@ async def get_horarios(request: Request):
     # Clave estable para este pedido (institute+subject+career), usada
     # tanto para guardar como para buscar en el respaldo de Upstash.
     cache_key = _build_horarios_cache_key(payload)
+    deadline = time.monotonic() + TOTAL_REQUEST_BUDGET_SECONDS
 
     try:
         commissions_json = await asyncio.wait_for(
-            _fetch_horarios_live(payload), timeout=LIVE_FETCH_BUDGET_SECONDS
+            _fetch_horarios_live(payload),
+            timeout=min(LIVE_FETCH_BUDGET_SECONDS, _remaining_budget(
+                deadline, minimum=0.5, maximum=LIVE_FETCH_BUDGET_SECONDS)),
         )
     except Exception as error:
         kind = "timeout" if isinstance(
             error, asyncio.TimeoutError) else "error"
         print(
             f"❌ {kind} en /api/horarios ({error}), se intentará usar respaldo.")
-        backed_up = await backup_get("horarios", cache_key)
+        backed_up = await backup_get("horarios", cache_key, timeout=_remaining_budget(deadline))
         if backed_up:
             print(
                 f"  → usando respaldo (Upstash) (guardado el {backed_up['updatedAt']})")
@@ -727,7 +775,7 @@ async def get_horarios(request: Request):
         # Sólo pisamos el respaldo cuando conseguimos datos reales;
         # un resultado vacío legítimo (materia sin comisiones) no
         # borra lo último bueno que teníamos guardado.
-        await backup_set("horarios", cache_key, commissions_json)
+        await backup_set("horarios", cache_key, commissions_json, timeout=_remaining_budget(deadline))
         # Devolvemos el JSON original completo (sin aplanar)
         return commissions_json
 
@@ -739,7 +787,7 @@ async def get_horarios(request: Request):
     # Consultamos el respaldo también en este caso, no sólo cuando hay
     # excepción, y sólo lo usamos si tiene datos (si el respaldo también
     # está vacío o no existe, ahí sí es un [] legítimo).
-    backed_up = await backup_get("horarios", cache_key)
+    backed_up = await backup_get("horarios", cache_key, timeout=_remaining_budget(deadline))
     if backed_up and backed_up.get("data"):
         print(
             f"  → fetch en vivo devolvió vacío, usando respaldo (Upstash) "
