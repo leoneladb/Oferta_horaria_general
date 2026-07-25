@@ -9,6 +9,7 @@ Endpoints:
   GET  /api/test
 """
 
+import asyncio
 import hashlib
 import json
 import os
@@ -57,6 +58,25 @@ UPSTASH_REDIS_REST_URL = os.environ.get(
 UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
 _UPSTASH_HEADERS = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
+
+# ==================== PRESUPUESTO DE TIEMPO PARA INTENTOS EN VIVO ====================
+# Problema que resuelve esto: cuando la UNAJ está caída pero "se cuelga"
+# (no rechaza la conexión al toque, sino que tarda en responder o no
+# responde nunca), la cadena completa de intentos (detectar período +
+# paginación + siusync + 5 variantes RSC/HTML) puede tardar mucho más que
+# el límite de ejecución de una función serverless en Vercel (10s en el
+# plan Hobby). Si Vercel mata la función antes de que lleguemos a leer el
+# respaldo de Upstash, el usuario recibe un error o un array vacío en vez
+# del respaldo, aunque el respaldo esté perfecto. De ahí el síntoma de "a
+# veces carga el respaldo y a veces no": depende de si la UNAJ falla
+# rápido (llegamos al respaldo a tiempo) o se cuelga (Vercel corta antes).
+#
+# La solución es ponerle un techo total a TODOS los intentos en vivo
+# combinados con asyncio.wait_for. Si se agota, cancelamos lo que sea que
+# esté colgado y pasamos directo al respaldo, garantizando que siempre
+# llegamos a esa parte a tiempo.
+LIVE_FETCH_BUDGET_SECONDS = float(
+    os.environ.get("LIVE_FETCH_BUDGET_SECONDS", "8"))
 
 
 def _now_iso() -> str:
@@ -167,7 +187,7 @@ async def _detect_current_period() -> Optional[int]:
     el período vigente es el más alto (los IDs son incrementales), ya que
     la propia página arma sus componentes/props con el período activo.
     """
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
         try:
             resp = await client.get(
                 "https://oferta-academica.espacios.unaj.edu.ar/",
@@ -353,10 +373,18 @@ def _dedupe_key(item: dict) -> str:
     return f"nc:{code}|{name}"
 
 
-@app.get("/api/materias/{carrer_id}")
-async def get_materias(carrer_id: str):
-    print(f"→ /api/materias/{carrer_id} (inicio)")
+async def _fetch_materias_live(carrer_id: str) -> Optional[list]:
+    """
+    Intenta conseguir las materias EN VIVO desde la UNAJ, probando en orden:
+    paginación por offset -> siusync directo -> variantes RSC/HTML.
+    Devuelve la lista si consiguió algo, o None si ninguna vía funcionó.
 
+    Esta función corre bajo un timeout global (asyncio.wait_for con
+    LIVE_FETCH_BUDGET_SECONDS) desde get_materias, así que los timeouts
+    de cada request individual son cortos a propósito: no necesitan cubrir
+    todo el presupuesto ellos solos, solo evitar que UN request cuelgue
+    más de la cuenta dentro del presupuesto total.
+    """
     # 1) Intento principal: endpoint real de la página oficial, paginando
     #    con "offset" de a 10 en 10 (confirmado viendo el Network tab:
     #    https://oferta-academica.espacios.unaj.edu.ar/?academicPeriodId=5&
@@ -373,7 +401,7 @@ async def get_materias(carrer_id: str):
     offset = 0
     period = await get_current_period()
 
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
         for _ in range(MAX_PAGES):
             try:
                 resp = await client.get(
@@ -434,13 +462,12 @@ async def get_materias(carrer_id: str):
     if len(all_items) > 0:
         print(
             f"  ✓✓ TOTAL FINAL: {len(all_items)} materias para carrera {carrer_id}")
-        await backup_set("materias", carrer_id, all_items)
         return all_items
 
     print("  ⚠ Paginación por offset no devolvió nada. Probando siusync directo...")
 
     # 2) FALLBACK: API oficial siusync (comportamiento original, por si acaso)
-    async with httpx.AsyncClient(timeout=12.0) as client:
+    async with httpx.AsyncClient(timeout=5.0) as client:
         try:
             resp = await client.get(
                 "https://siusync.espacios.unaj.edu.ar/api/v1/Subject",
@@ -455,7 +482,6 @@ async def get_materias(carrer_id: str):
             )
             data = resp.json()
             if isinstance(data, dict) and isinstance(data.get("items"), list) and data["items"]:
-                await backup_set("materias", carrer_id, data["items"])
                 return data["items"]
         except Exception as err:
             print(f"  ⚠ Error siusync: {err}")
@@ -474,7 +500,7 @@ async def get_materias(carrer_id: str):
                                            **DEFAULT_HEADERS}, "qs": f"?carrerId={carrer_id}"},
     ]
 
-    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
         for variant in variants:
             try:
                 url = f"https://oferta-academica.espacios.unaj.edu.ar/{variant['qs']}"
@@ -501,7 +527,6 @@ async def get_materias(carrer_id: str):
                                 parsed[0].get("subjectId") or parsed[0].get(
                                     "name") or parsed[0].get("code")
                             ):
-                                await backup_set("materias", carrer_id, parsed)
                                 return parsed
                         except Exception:
                             pass
@@ -510,7 +535,6 @@ async def get_materias(carrer_id: str):
                     try:
                         materias = json.loads(found)
                         if isinstance(materias, list) and materias:
-                            await backup_set("materias", carrer_id, materias)
                             return materias
                     except Exception:
                         pass
@@ -529,17 +553,41 @@ async def get_materias(carrer_id: str):
                         }
                         for idx, p in enumerate(parsed_from_html)
                     ]
-                    await backup_set("materias", carrer_id, mapped)
                     return mapped
             except Exception:
                 pass
 
-    # 4) ÚLTIMA OPCIÓN: si la página oficial no devolvió nada usable por
-    #    ninguna vía, usamos el último resultado bueno que hayamos guardado
-    #    en el JSON de respaldo local para esta carrera.
+    # Ninguna vía en vivo consiguió nada usable.
+    return None
+
+
+@app.get("/api/materias/{carrer_id}")
+async def get_materias(carrer_id: str):
+    print(f"→ /api/materias/{carrer_id} (inicio)")
+
+    try:
+        result = await asyncio.wait_for(
+            _fetch_materias_live(carrer_id), timeout=LIVE_FETCH_BUDGET_SECONDS
+        )
+    except Exception as err:
+        kind = "timeout" if isinstance(
+            err, asyncio.TimeoutError) else "error"
+        print(f"  ⚠ {kind} trayendo materias en vivo ({err}), "
+              f"se pasa directo al respaldo.")
+        result = None
+
+    if result:
+        print(
+            f"  ✓✓ TOTAL FINAL: {len(result)} materias para carrera {carrer_id}")
+        await backup_set("materias", carrer_id, result)
+        return result
+
+    # ÚLTIMA OPCIÓN: si la página oficial no devolvió nada usable por
+    # ninguna vía (o se agotó el presupuesto de tiempo), usamos el último
+    # resultado bueno que hayamos guardado en el respaldo de Upstash.
     backed_up = await backup_get("materias", carrer_id)
     if backed_up:
-        print(f"  → usando respaldo JSON local para carrera {carrer_id} "
+        print(f"  → usando respaldo (Upstash) para carrera {carrer_id} "
               f"(guardado el {backed_up['updatedAt']})")
         return {
             "items": backed_up["data"],
@@ -553,117 +601,136 @@ async def get_materias(carrer_id: str):
 # ==================== RUTA: HORARIOS ====================
 
 
+async def _fetch_horarios_live(payload: Any) -> list:
+    """
+    Intenta conseguir los horarios/comisiones EN VIVO desde la UNAJ.
+    Devuelve la lista (puede ser [] si la materia legítimamente no tiene
+    comisiones). Deja que cualquier excepción (de red, parseo, etc.) se
+    propague — el llamador decide qué hacer con el respaldo.
+
+    Corre bajo un timeout global (asyncio.wait_for con
+    LIVE_FETCH_BUDGET_SECONDS) desde get_horarios.
+    """
+    # Pisamos el academicPeriodId que venga del frontend con el detectado
+    # automáticamente, así el HTML nunca necesita saber cuál es el período
+    # vigente ni hace falta tocarlo a mano.
+    period = await get_current_period()
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                item["academicPeriodId"] = period
+    elif isinstance(payload, dict):
+        payload["academicPeriodId"] = period
+
+    # IMPORTANTE: mantené este hash actualizado si la web original lo cambia
+    NEXT_ACTION = "4089e22bca8943bcf018b9b5d8177263d5f601e6dd"
+
+    async with httpx.AsyncClient(timeout=6.0) as client:
+        resp = await client.post(
+            "https://oferta-academica.espacios.unaj.edu.ar/",
+            headers={
+                "Accept": "text/x-component",
+                "Content-Type": "text/plain;charset=UTF-8",
+                "Next-Action": NEXT_ACTION,
+                "User-Agent": "Mozilla/5.0",
+                "Origin": "https://oferta-academica.espacios.unaj.edu.ar",
+                "Referer": "https://oferta-academica.espacios.unaj.edu.ar/",
+            },
+            content=json.dumps(payload),
+        )
+
+    raw = resp.text or ""
+    commissions_json = None
+
+    items_index = raw.find('"items"')
+    if items_index != -1:
+        start = raw.find("[", items_index)
+        if start != -1:
+            extracted = extract_balanced_array(raw, start)
+            if extracted:
+                try:
+                    parsed = json.loads(extracted)
+                    if isinstance(parsed, list):
+                        commissions_json = parsed
+                except Exception:
+                    pass
+
+    if commissions_json is None:
+        m = re.search(r'"commissions"\s*:\s*(\[[\s\S]*?\])', raw)
+        if m:
+            try:
+                commissions_json = json.loads(m.group(1))
+            except Exception:
+                pass
+
+    if commissions_json is None:
+        parsed_from_html = parse_html_table(raw)
+        if parsed_from_html:
+            commissions_json = [
+                {
+                    "name": item.get("name"),
+                    "day": item.get("dayTime"),
+                    "time": item.get("hours"),
+                    "teacherName": item.get("teacher"),
+                    "classroomName": item.get("classroom"),
+                    "buildingName": item.get("building"),
+                    "headquarterName": item.get("headquarter"),
+                    "observations": item.get("observations"),
+                    # Este fallback (parseo manual de tabla HTML) no
+                    # tiene forma de saber si el aula está confirmada o
+                    # no. En vez de dejar el campo ausente (lo que el
+                    # frontend interpreta como "sí está asignada" y
+                    # muestra el aula), declaramos explícitamente que
+                    # no sabemos, para que se muestre "Aula sin
+                    # asignar" en lugar de arriesgar un dato incorrecto.
+                    "assignament": {"id": None, "description": "No asignada"},
+                    "raw": item,
+                }
+                for item in parsed_from_html
+            ]
+
+    if not isinstance(commissions_json, list):
+        commissions_json = []
+
+    return commissions_json
+
+
 @app.post("/api/horarios")
 async def get_horarios(request: Request):
     payload = await request.json()
 
     # Clave estable para este pedido (institute+subject+career), usada
-    # tanto para guardar como para buscar en el respaldo JSON local.
+    # tanto para guardar como para buscar en el respaldo de Upstash.
     cache_key = _build_horarios_cache_key(payload)
 
     try:
-        # Pisamos el academicPeriodId que venga del frontend con el
-        # detectado automáticamente, así el HTML nunca necesita saber
-        # cuál es el período vigente ni hace falta tocarlo a mano.
-        period = await get_current_period()
-        if isinstance(payload, list):
-            for item in payload:
-                if isinstance(item, dict):
-                    item["academicPeriodId"] = period
-        elif isinstance(payload, dict):
-            payload["academicPeriodId"] = period
-
-        # IMPORTANTE: mantené este hash actualizado si la web original lo cambia
-        NEXT_ACTION = "4089e22bca8943bcf018b9b5d8177263d5f601e6dd"
-
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                "https://oferta-academica.espacios.unaj.edu.ar/",
-                headers={
-                    "Accept": "text/x-component",
-                    "Content-Type": "text/plain;charset=UTF-8",
-                    "Next-Action": NEXT_ACTION,
-                    "User-Agent": "Mozilla/5.0",
-                    "Origin": "https://oferta-academica.espacios.unaj.edu.ar",
-                    "Referer": "https://oferta-academica.espacios.unaj.edu.ar/",
-                },
-                content=json.dumps(payload),
-            )
-
-        raw = resp.text or ""
-        commissions_json = None
-
-        items_index = raw.find('"items"')
-        if items_index != -1:
-            start = raw.find("[", items_index)
-            if start != -1:
-                extracted = extract_balanced_array(raw, start)
-                if extracted:
-                    try:
-                        parsed = json.loads(extracted)
-                        if isinstance(parsed, list):
-                            commissions_json = parsed
-                    except Exception:
-                        pass
-
-        if commissions_json is None:
-            m = re.search(r'"commissions"\s*:\s*(\[[\s\S]*?\])', raw)
-            if m:
-                try:
-                    commissions_json = json.loads(m.group(1))
-                except Exception:
-                    pass
-
-        if commissions_json is None:
-            parsed_from_html = parse_html_table(raw)
-            if parsed_from_html:
-                commissions_json = [
-                    {
-                        "name": item.get("name"),
-                        "day": item.get("dayTime"),
-                        "time": item.get("hours"),
-                        "teacherName": item.get("teacher"),
-                        "classroomName": item.get("classroom"),
-                        "buildingName": item.get("building"),
-                        "headquarterName": item.get("headquarter"),
-                        "observations": item.get("observations"),
-                        # Este fallback (parseo manual de tabla HTML) no
-                        # tiene forma de saber si el aula está confirmada o
-                        # no. En vez de dejar el campo ausente (lo que el
-                        # frontend interpreta como "sí está asignada" y
-                        # muestra el aula), declaramos explícitamente que
-                        # no sabemos, para que se muestre "Aula sin
-                        # asignar" en lugar de arriesgar un dato incorrecto.
-                        "assignament": {"id": None, "description": "No asignada"},
-                        "raw": item,
-                    }
-                    for item in parsed_from_html
-                ]
-
-        if not isinstance(commissions_json, list):
-            commissions_json = []
-
-        if commissions_json:
-            # Sólo pisamos el respaldo cuando conseguimos datos reales;
-            # un resultado vacío legítimo (materia sin comisiones) no
-            # borra lo último bueno que teníamos guardado.
-            await backup_set("horarios", cache_key, commissions_json)
-
-        # Devolvemos el JSON original completo (sin aplanar)
-        return commissions_json
-
+        commissions_json = await asyncio.wait_for(
+            _fetch_horarios_live(payload), timeout=LIVE_FETCH_BUDGET_SECONDS
+        )
     except Exception as error:
-        print(f"❌ Error en /api/horarios, se intentará usar respaldo: {error}")
+        kind = "timeout" if isinstance(
+            error, asyncio.TimeoutError) else "error"
+        print(
+            f"❌ {kind} en /api/horarios ({error}), se intentará usar respaldo.")
         backed_up = await backup_get("horarios", cache_key)
         if backed_up:
             print(
-                f"  → usando respaldo JSON local (guardado el {backed_up['updatedAt']})")
+                f"  → usando respaldo (Upstash) (guardado el {backed_up['updatedAt']})")
             return {
                 "items": backed_up["data"],
                 "fromCache": True,
                 "cachedAt": backed_up["updatedAt"],
             }
         return JSONResponse(status_code=500, content={"error": "Error interno extrayendo horarios y no hay respaldo disponible"})
+
+    if commissions_json:
+        # Sólo pisamos el respaldo cuando conseguimos datos reales;
+        # un resultado vacío legítimo (materia sin comisiones) no
+        # borra lo último bueno que teníamos guardado.
+        await backup_set("horarios", cache_key, commissions_json)
+
+    # Devolvemos el JSON original completo (sin aplanar)
+    return commissions_json
 
 
 # ==================== RUTA: RATE LIMIT DE COMENTARIOS ====================
