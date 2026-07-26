@@ -17,6 +17,7 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, Request
@@ -109,6 +110,18 @@ def _remaining_budget(deadline: float, minimum: float = 0.5, maximum: float = 3.
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# Zona horaria usada para decidir "cambió el día". OJO: si esto se
+# calculara en UTC, el backup completo se dispararía a las 21hs de
+# Argentina (cuando en UTC ya es el día siguiente) en vez de a la
+# medianoche real, así que usamos siempre la hora de Buenos Aires.
+_ARG_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def _today_str() -> str:
+    """Fecha de hoy (YYYY-MM-DD) en horario de Argentina."""
+    return datetime.now(_ARG_TZ).strftime("%Y-%m-%d")
 
 
 def _backup_configured() -> bool:
@@ -283,6 +296,17 @@ async def get_current_period(force_refresh: bool = False) -> int:
 # Para producción real conviene mover esto a Redis o una tabla en la DB.
 COMMENT_COOLDOWN_SECONDS = 10
 _last_comment_by_ip: dict[str, float] = {}
+
+# ADVERTENCIA DE SEGURIDAD: /api/backup/ensure-daily es pública (la llama
+# el frontend sin login) y dispara TODO el proceso pesado de backup
+# (scraping en cascada de N carreras + sus horarios). Sin límite, cualquiera
+# que conozca la URL puede spamearla y agotar la cuota gratuita de Vercel
+# (Function Invocations / Fluid Active CPU) o de Upstash en minutos. Este
+# cooldown por IP es una mitigación básica: no reemplaza tener CRON_SECRET
+# configurado en /api/backup/cron-trigger, que sigue siendo la vía "oficial".
+ENSURE_DAILY_COOLDOWN_SECONDS = float(
+    os.environ.get("ENSURE_DAILY_COOLDOWN_SECONDS", "30"))
+_last_ensure_daily_by_ip: dict[str, float] = {}
 
 
 def _get_client_ip(request: Request) -> str:
@@ -801,6 +825,406 @@ async def get_horarios(request: Request):
     return commissions_json
 
 
+# ==================== BACKUP COMPLETO POR CAMBIO DE FECHA ====================
+# Objetivo: no depender de que cada usuario haya entrado justo a la
+# carrera/materia puntual que se quiere respaldar (backup "parcial" que
+# ya existe en get_materias/get_horarios). En cambio: la PRIMERA vez que
+# alguien entra a la página en un día distinto al último backup completo,
+# se vuelve a pedir en vivo TODO: las materias de cada carrera Y los
+# horarios de cada una de esas materias (los horarios cambian de un día
+# para el otro — aula, comisión, docente — así que no alcanza con
+# respaldar sólo la lista de materias).
+#
+# La lista de carreras no está hardcodeada acá: la manda el frontend en
+# el body (carrerIds), porque el frontend ya la tiene (es la misma lista
+# que usa para armar el selector de carreras) y así nunca se desincroniza
+# si agregás/sacás una carrera de un solo lado. Los horarios a respaldar
+# SÍ se calculan acá: salen de las materias que se acaban de traer para
+# cada carrera (cada materia trae su subjectId/instituteId, con eso se
+# arma el mismo payload que usa /api/horarios).
+#
+# LÍMITE DURO DEL PLAN HOBBY DE VERCEL: 10 segundos por invocación, sin
+# excepción (a menos que actives Fluid Compute). Como ahora el trabajo
+# total es "carreras × materias por carrera", en un backend con muchas
+# materias esto NO entra en un solo pedido ni loco. Por eso todo corre en
+# TANDAS con dos colas persistidas en Redis:
+#   1) pendingCarreras  -> carreras a las que hay que pedirles su lista
+#                          de materias (y de ahí sacar qué horarios pedir).
+#   2) pendingHorarios  -> horarios puntuales (por materia) a pedir.
+# Cada visita procesa lo que entra en FULL_BACKUP_TOTAL_BUDGET_SECONDS y
+# corta ahí, guardando qué quedó pendiente. La PRÓXIMA visita del mismo
+# día retoma exactamente donde quedó (primero termina las carreras que
+# faltan, después sigue con los horarios), y además se auto-dispara sola
+# para la siguiente tanda (ver _trigger_next_backup_link más abajo), así
+# NO depende de que alguien vuelva a entrar a la página para terminar la
+# ronda completa del día — es el precio de que NUNCA se pase de 10s pase
+# lo que pase, en vez de arriesgarse a que Vercel mate la función a
+# mitad de camino sin ninguna garantía de qué alcanzó a guardarse.
+FULL_BACKUP_CONCURRENCY = int(os.environ.get("FULL_BACKUP_CONCURRENCY", "3"))
+FULL_BACKUP_PER_ITEM_TIMEOUT = float(
+    os.environ.get("FULL_BACKUP_PER_ITEM_TIMEOUT", "5"))
+
+
+def _extract_horario_payload(item: Any, carrer_id: str) -> Optional[dict]:
+    """
+    A partir de una materia (tal como la devuelve _fetch_materias_live),
+    arma el payload {instituteId, subjectId, careerId} que necesita
+    /api/horarios para pedir los horarios de ESA materia puntual.
+
+    Devuelve None si a la materia le falta el subjectId o el
+    instituteId (por ejemplo, las que vinieron del parseo manual de
+    tabla HTML como último recurso, que no tienen esos IDs) — esas no se
+    pueden respaldar porque no hay forma de pedir sus horarios sin ellos.
+    El careerId NO se saca del item: usamos directamente el carrer_id que
+    ya sabemos que estamos recorriendo, para no depender de con qué
+    nombre de campo venga (si es que viene) dentro del item.
+    """
+    if not isinstance(item, dict):
+        return None
+    subject_id = item.get("subjectId")
+    institute_id = item.get("instituteId")
+    if institute_id is None and isinstance(item.get("institute"), dict):
+        institute_id = item["institute"].get("id")
+    if subject_id is None or institute_id is None:
+        return None
+    return {"instituteId": institute_id, "subjectId": subject_id, "careerId": carrer_id}
+
+
+async def _backup_one_carrera(cid: str) -> tuple[str, list[dict]]:
+    """Pide en vivo las materias de UNA carrera, las guarda, y devuelve
+    también la lista de payloads de horarios que hay que respaldar a
+    partir de esas materias. Nunca tira excepción hacia afuera."""
+    try:
+        items = await asyncio.wait_for(
+            _fetch_materias_live(cid), timeout=FULL_BACKUP_PER_ITEM_TIMEOUT
+        )
+    except Exception as err:
+        return f"error: {err}", []
+    if not items:
+        # No pisamos el respaldo anterior si esta vez no conseguimos
+        # nada (backup_set ya protege esto solo).
+        return "vacío (se conserva respaldo anterior)", []
+    await backup_set("materias", cid, items, timeout=3.0)
+    horario_payloads = []
+    for it in items:
+        payload = _extract_horario_payload(it, cid)
+        if payload:
+            horario_payloads.append(payload)
+    return f"ok ({len(items)} materias)", horario_payloads
+
+
+async def _backup_one_horario(payload: dict) -> str:
+    """Pide en vivo los horarios/comisiones de UNA materia puntual y los
+    guarda en Redis, en la MISMA key que ya usa /api/horarios (mismo
+    _build_horarios_cache_key), así ambos caminos comparten el respaldo."""
+    try:
+        commissions = await asyncio.wait_for(
+            _fetch_horarios_live(dict(payload)),
+            timeout=FULL_BACKUP_PER_ITEM_TIMEOUT,
+        )
+    except Exception as err:
+        return f"error: {err}"
+    if isinstance(commissions, list) and commissions:
+        cache_key = _build_horarios_cache_key(payload)
+        await backup_set("horarios", cache_key, commissions, timeout=3.0)
+        return f"ok ({len(commissions)} comisiones)"
+    # Vacío legítimo (materia sin comisiones) o glitch puntual: no
+    # pisamos un respaldo anterior bueno con nada.
+    return "vacío (se conserva respaldo anterior)"
+
+
+async def _run_full_backup_batch(
+    pending_carreras: list[str],
+    pending_horarios: list[dict],
+    deadline: float,
+) -> tuple[dict[str, str], list[str], list[dict], dict[str, str]]:
+    """
+    Fase 1: drena `pending_carreras` (materias por carrera) hasta
+    agotarla o quedarse sin tiempo. Cada carrera que termina bien agrega
+    sus materias como nuevos pendientes de horarios (deduplicados por
+    clave de cache).
+    Fase 2: con el tiempo que quede después de la fase 1, drena
+    `pending_horarios`.
+    Nunca cruza `deadline` (tiempo absoluto de time.monotonic()).
+    Devuelve (resultados de materias, carreras que quedaron pendientes,
+    horarios que quedaron pendientes, resultados de horarios).
+    """
+    materias_results: dict[str, str] = {}
+    horarios_results: dict[str, str] = {}
+
+    remaining_carreras = list(pending_carreras)
+    all_horarios = list(pending_horarios)
+    seen_horario_keys = {_build_horarios_cache_key(p) for p in all_horarios}
+
+    while remaining_carreras and time.monotonic() < deadline:
+        chunk = remaining_carreras[:FULL_BACKUP_CONCURRENCY]
+        chunk_results = await asyncio.gather(
+            *(_backup_one_carrera(cid) for cid in chunk)
+        )
+        for cid, (res, new_payloads) in zip(chunk, chunk_results):
+            materias_results[cid] = res
+            for p in new_payloads:
+                key = _build_horarios_cache_key(p)
+                if key not in seen_horario_keys:
+                    seen_horario_keys.add(key)
+                    all_horarios.append(p)
+        remaining_carreras = remaining_carreras[len(chunk):]
+
+    remaining_horarios = list(all_horarios)
+    while remaining_horarios and time.monotonic() < deadline:
+        chunk = remaining_horarios[:FULL_BACKUP_CONCURRENCY]
+        chunk_results = await asyncio.gather(
+            *(_backup_one_horario(p) for p in chunk)
+        )
+        for p, res in zip(chunk, chunk_results):
+            horarios_results[_build_horarios_cache_key(p)] = res
+        remaining_horarios = remaining_horarios[len(chunk):]
+
+    return materias_results, remaining_carreras, remaining_horarios, horarios_results
+
+
+FULL_BACKUP_TOTAL_BUDGET_SECONDS = float(
+    os.environ.get("FULL_BACKUP_TOTAL_BUDGET_SECONDS", "6.5"))
+FULL_BACKUP_CHAIN_LINK_TIMEOUT_SECONDS = float(
+    os.environ.get("FULL_BACKUP_CHAIN_LINK_TIMEOUT_SECONDS", "1.5"))
+FULL_BACKUP_MAX_CHAIN_LINKS_PER_DAY = int(
+    os.environ.get("FULL_BACKUP_MAX_CHAIN_LINKS_PER_DAY", "80"))
+# Lista de carreras para cuando dispara el CRON (no hay "frontend" que
+# mande el body ahí). Se configura una vez como variable de entorno en
+# Vercel, separada por comas: BACKUP_CARRER_IDS=1,2,3,4,5
+BACKUP_CARRER_IDS_ENV = os.environ.get("BACKUP_CARRER_IDS", "")
+CRON_SECRET = os.environ.get("CRON_SECRET", "")
+
+
+async def _trigger_next_backup_link(base_url: str, carrer_ids: list[str]) -> None:
+    """
+    Dispara el SIGUIENTE eslabón de la cadena de backup completo: un
+    pedido a esta misma ruta, para que arranque la próxima tanda de
+    trabajo. A propósito NO esperamos a que esa próxima tanda termine
+    (usamos un timeout corto y lo ignoramos si salta): en Vercel cada
+    pedido HTTP corre como una invocación de función aparte, así que en
+    cuanto el pedido sale, la próxima tanda ya está corriendo sola e
+    independiente, sin importar si nosotros seguimos esperando su
+    respuesta o no. Si esperáramos la respuesta completa, terminaríamos
+    encadenando todo dentro de una sola invocación y volveríamos a
+    chocar con el límite de 10s de Vercel.
+    """
+    url = base_url.rstrip("/") + "/api/backup/ensure-daily"
+    try:
+        async with httpx.AsyncClient(timeout=FULL_BACKUP_CHAIN_LINK_TIMEOUT_SECONDS) as client:
+            await client.post(url, json={"carrerIds": carrer_ids})
+        print("  → siguiente eslabón de la cadena confirmado (respondió antes del timeout corto).")
+    except Exception:
+        # Lo esperado la mayoría de las veces: nos quedamos sin tiempo
+        # de espera ANTES de que el próximo eslabón termine de
+        # responder. Eso es justo el comportamiento buscado: el pedido
+        # ya salió y esa próxima invocación sigue corriendo sola.
+        print("  → siguiente eslabón de la cadena disparado (no se esperó su respuesta completa, a propósito).")
+
+
+async def _ensure_daily_backup_core(carrer_ids: list[str], base_url: str) -> dict:
+    """
+    Lógica compartida entre el endpoint que llama el frontend (con
+    carrerIds en el body) y el endpoint que dispara el cron de Vercel
+    (sin body, con carrerIds fijos por variable de entorno). Hace UNA
+    tanda de trabajo (~FULL_BACKUP_TOTAL_BUDGET_SECONDS) y, si queda
+    algo pendiente, se auto-dispara para la siguiente tanda antes de
+    devolver la respuesta — así la ronda del día se termina sola, sin
+    depender de que alguien vuelva a entrar a la página ni de que el
+    cron vuelva a disparar (el cron en Hobby sólo corre una vez al día,
+    pero esta cadena sigue sola las veces que haga falta ese mismo día).
+    """
+    today = _today_str()
+    deadline = time.monotonic() + FULL_BACKUP_TOTAL_BUDGET_SECONDS
+
+    progress_entry = await backup_get("backup", "fullBackupProgress")
+    progress = progress_entry.get("data") if isinstance(
+        progress_entry, dict) else None
+
+    if isinstance(progress, dict) and progress.get("date") == today:
+        pending_carreras = list(progress.get("pendingCarreras") or [])
+        done_carreras = list(progress.get("doneCarreras") or [])
+        pending_horarios = list(progress.get("pendingHorarios") or [])
+        done_horarios_count = int(progress.get("doneHorariosCount") or 0)
+        chain_links_today = int(progress.get("chainLinksToday") or 0)
+        if not pending_carreras and not pending_horarios:
+            return {"ranFullBackup": False, "reason": "ya se completó hoy", "date": today}
+    else:
+        # Fecha distinta a la última vez (o nunca se guardó nada):
+        # arrancamos de cero con TODAS las carreras recibidas.
+        pending_carreras = list(carrer_ids)
+        done_carreras = []
+        pending_horarios = []
+        done_horarios_count = 0
+        chain_links_today = 0
+
+    print(
+        f"→ Backup completo ({today}), eslabón #{chain_links_today + 1}: "
+        f"{len(pending_carreras)} carreras y {len(pending_horarios)} horarios pendientes."
+    )
+    materias_results, remaining_carreras, remaining_horarios, horarios_results = (
+        await _run_full_backup_batch(pending_carreras, pending_horarios, deadline)
+    )
+
+    processed_carreras = [
+        c for c in pending_carreras if c not in remaining_carreras]
+    done_carreras = done_carreras + processed_carreras
+    done_horarios_count += len(horarios_results)
+    chain_links_today += 1
+    finished = not remaining_carreras and not remaining_horarios
+
+    await backup_set(
+        "backup",
+        "fullBackupProgress",
+        {
+            "date": today,
+            "pendingCarreras": remaining_carreras,
+            "doneCarreras": done_carreras,
+            "pendingHorarios": remaining_horarios,
+            "doneHorariosCount": done_horarios_count,
+            "chainLinksToday": chain_links_today,
+        },
+        timeout=3.0,
+    )
+
+    print(
+        f"  → eslabón #{chain_links_today}: {len(processed_carreras)} carreras y "
+        f"{len(horarios_results)} horarios procesados; quedan "
+        f"{len(remaining_carreras)} carreras y {len(remaining_horarios)} horarios "
+        f"({'COMPLETO' if finished else 'sigue encadenando solo'})."
+    )
+
+    if not finished:
+        if chain_links_today < FULL_BACKUP_MAX_CHAIN_LINKS_PER_DAY:
+            await _trigger_next_backup_link(base_url, carrer_ids)
+        else:
+            # Freno de seguridad: si esto se disparó, algo no anda bien
+            # (por ejemplo la UNAJ caída de forma sostenida), no una
+            # cantidad normal de materias. Mejor cortar la cadena acá y
+            # que retome la próxima visita real o el cron de mañana, que
+            # seguir encadenando sin límite.
+            print(
+                f"  ⚠ Se alcanzó el máximo de eslabones encadenados hoy "
+                f"({FULL_BACKUP_MAX_CHAIN_LINKS_PER_DAY}); freno de seguridad activado. "
+                f"Queda pendiente para la próxima visita real o el próximo cron."
+            )
+
+    return {
+        "ranFullBackup": True,
+        "date": today,
+        "completedToday": finished,
+        "chainLinksToday": chain_links_today,
+        "processedThisCall": {
+            "carreras": len(processed_carreras),
+            "horarios": len(horarios_results),
+        },
+        "totalDone": {
+            "carreras": len(done_carreras),
+            "horarios": done_horarios_count,
+        },
+        "totalPending": {
+            "carreras": len(remaining_carreras),
+            "horarios": len(remaining_horarios),
+        },
+        "results": {
+            "materias": materias_results,
+            "horarios": horarios_results,
+        },
+    }
+
+
+@app.post("/api/backup/ensure-daily")
+async def ensure_daily_backup(request: Request):
+    """
+    Pensada para que el FRONTEND la llame una sola vez cuando alguien
+    entra a la página (por ejemplo en el layout raíz, sin bloquear el
+    render). Body esperado (JSON): {"carrerIds": ["1", "2", "3", ...]}
+    (la lista completa de carreras que ya tiene el propio frontend).
+
+    Ya NO hace falta que alguien se quede en la página ni que vuelva a
+    entrar para que termine: si después de esta tanda queda trabajo
+    pendiente, esta misma ruta se vuelve a disparar sola (ver
+    _ensure_daily_backup_core) hasta terminar TODA la ronda del día,
+    encadenando tandas de forma automática.
+    """
+    # ---- Mitigación de abuso: rate limit por IP ----
+    # Ver advertencia junto a ENSURE_DAILY_COOLDOWN_SECONDS más arriba.
+    ip = _get_client_ip(request)
+    now = time.time()
+    last = _last_ensure_daily_by_ip.get(ip)
+    if last is not None and (now - last) < ENSURE_DAILY_COOLDOWN_SECONDS:
+        remaining = round(ENSURE_DAILY_COOLDOWN_SECONDS - (now - last), 1)
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Demasiados pedidos, esperá un momento.",
+                     "waitSeconds": remaining},
+        )
+    _last_ensure_daily_by_ip[ip] = now
+
+    body = await request.json()
+    carrer_ids = [str(c)
+                  for c in (body.get("carrerIds") or []) if c is not None]
+
+    if not carrer_ids:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Falta carrerIds (lista de IDs de carrera) en el body."},
+        )
+
+    # Tope duro de cantidad: nunca deberías tener más carreras que las que
+    # ya conocés de antemano (BACKUP_CARRER_IDS). Si alguien manda una
+    # lista inventada gigante, la cortamos acá en vez de dejar que dispare
+    # cientos de pedidos en cascada a la UNAJ.
+    MAX_CARRER_IDS_PER_CALL = 50
+    if len(carrer_ids) > MAX_CARRER_IDS_PER_CALL:
+        carrer_ids = carrer_ids[:MAX_CARRER_IDS_PER_CALL]
+
+    result = await _ensure_daily_backup_core(carrer_ids, str(request.base_url))
+    return result
+
+
+@app.get("/api/backup/cron-trigger")
+async def cron_trigger_backup(request: Request):
+    """
+    Ruta pensada para un Vercel Cron Job (ver vercel.json), NO para el
+    frontend. El cron manda un GET simple sin body, así que acá la
+    lista de carreras sale de la variable de entorno BACKUP_CARRER_IDS
+    (separada por comas) en vez de venir en el pedido. Con esto, el
+    backup completo arranca SOLO todos los días a la hora que
+    configures en el cron, sin depender de que entre ningún visitante
+    real — y una vez que arranca, se auto-encadena igual que si lo
+    hubiera disparado el frontend, hasta terminar la ronda completa.
+
+    Seguridad: si configuraste la variable de entorno CRON_SECRET en
+    Vercel, esta ruta exige que el pedido traiga
+    "Authorization: Bearer <CRON_SECRET>" (Vercel se lo manda solo a
+    sus propios cron jobs). Si no configuraste CRON_SECRET, la ruta
+    igual funciona, pero cualquiera que conozca la URL podría
+    dispararla a mano — se recomienda configurarlo.
+    """
+    if CRON_SECRET:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header != f"Bearer {CRON_SECRET}":
+            return JSONResponse(status_code=401, content={"error": "No autorizado."})
+
+    carrer_ids = [c.strip()
+                  for c in BACKUP_CARRER_IDS_ENV.split(",") if c.strip()]
+    if not carrer_ids:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Falta configurar la variable de entorno BACKUP_CARRER_IDS "
+                         "(lista de IDs de carrera separada por comas) en Vercel."
+            },
+        )
+
+    print(
+        f"→ Cron diario disparó el backup completo ({len(carrer_ids)} carreras configuradas).")
+    result = await _ensure_daily_backup_core(carrer_ids, str(request.base_url))
+    return result
+
+
 # ==================== RUTA: RATE LIMIT DE COMENTARIOS ====================
 
 @app.post("/api/comments/check")
@@ -891,10 +1315,17 @@ async def backup_status():
             }
 
     period_entry = await backup_get("period", "current")
+    full_backup_progress_entry = await backup_get("backup", "fullBackupProgress")
+    full_backup_progress = (
+        full_backup_progress_entry.get("data")
+        if isinstance(full_backup_progress_entry, dict)
+        else None
+    )
 
     return {
         "configured": True,
         "materias": materias_resumen,
         "horariosGuardados": len(horarios_keys),
         "period": period_entry,
+        "fullBackupProgress": full_backup_progress,
     }
