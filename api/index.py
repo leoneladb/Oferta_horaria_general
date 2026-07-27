@@ -11,6 +11,7 @@ Endpoints:
 
 import asyncio
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -310,12 +311,46 @@ _last_ensure_daily_by_ip: dict[str, float] = {}
 
 
 def _get_client_ip(request: Request) -> str:
-    # Si el server corre detrás de un proxy/CDN (ej. Vercel), la IP real
-    # suele venir en X-Forwarded-For. Si no está, usamos la IP de conexión directa.
+    # VULNERABILIDAD ORIGINAL: se tomaba el PRIMER valor de X-Forwarded-For
+    # (`forwarded.split(",")[0]`). Ese primer valor lo pone el cliente, no
+    # el proxy: cualquiera puede mandar "X-Forwarded-For: 1.2.3.4" (o un
+    # valor random distinto en cada pedido) y aparentar ser una IP nueva
+    # en cada request, esquivando por completo el rate limit por IP de
+    # /api/comments/check y /api/backup/ensure-daily.
+    #
+    # Fix: en Vercel, el proxy/edge agrega la IP real de la conexión al
+    # FINAL de la cadena X-Forwarded-For (los valores previos, si los hay,
+    # son los que mandó el cliente) y además expone esa misma IP real en
+    # X-Real-IP, que el cliente no puede pisar. Preferimos X-Real-IP y,
+    # si no está, usamos el ÚLTIMO tramo de X-Forwarded-For en vez del
+    # primero.
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
+
+
+def _prune_stale_ip_entries(store: dict[str, float], max_age_seconds: float) -> None:
+    """
+    VULNERABILIDAD ORIGINAL: `_last_comment_by_ip` y `_last_ensure_daily_by_ip`
+    son diccionarios en memoria que nunca se limpian. Como la clave es la
+    IP (que además, antes del fix de _get_client_ip, ni siquiera hacía
+    falta spoofear con cuidado), cualquiera puede mandar muchísimos
+    pedidos con IPs/valores distintos y hacer crecer el diccionario sin
+    límite hasta agotar la memoria del proceso (DoS). Se poda antes de
+    insertar una entrada nueva, sacando lo que ya venció hace rato.
+    """
+    if len(store) < 1000:
+        return
+    now = time.time()
+    stale = [ip for ip, ts in store.items() if (now - ts) > max_age_seconds]
+    for ip in stale:
+        store.pop(ip, None)
 
 
 # ==================== HELPERS ====================
@@ -1159,6 +1194,8 @@ async def ensure_daily_backup(request: Request):
             content={"error": "Demasiados pedidos, esperá un momento.",
                      "waitSeconds": remaining},
         )
+    _prune_stale_ip_entries(
+        _last_ensure_daily_by_ip, ENSURE_DAILY_COOLDOWN_SECONDS * 10)
     _last_ensure_daily_by_ip[ip] = now
 
     body = await request.json()
@@ -1205,7 +1242,11 @@ async def cron_trigger_backup(request: Request):
     """
     if CRON_SECRET:
         auth_header = request.headers.get("authorization", "")
-        if auth_header != f"Bearer {CRON_SECRET}":
+        expected = f"Bearer {CRON_SECRET}"
+        # Comparación en tiempo constante: usar "!=" filtra por timing
+        # cuántos caracteres iniciales coinciden, lo que en teoría permite
+        # adivinar el secreto carácter a carácter.
+        if not hmac.compare_digest(auth_header, expected):
             return JSONResponse(status_code=401, content={"error": "No autorizado."})
 
     carrer_ids = [c.strip()
@@ -1248,6 +1289,7 @@ async def check_comment_rate_limit(request: Request):
                 content={"allowed": False, "waitSeconds": remaining},
             )
 
+    _prune_stale_ip_entries(_last_comment_by_ip, COMMENT_COOLDOWN_SECONDS * 10)
     _last_comment_by_ip[ip] = now
     return {"allowed": True}
 

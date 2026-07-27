@@ -28,6 +28,94 @@
       })();
     </script>
     <style>
+      /* Forzamos layout en columna: fila superior con avatar+nombre, y los
+         correos debajo ocupando todo el ancho (antes quedaban apretados
+         al lado del nombre porque el .teacher-card original es flex-row). */
+      .teacher-card {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .teacher-card-toprow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .teacher-email-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 0;
+      }
+      .teacher-email-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .teacher-email-icon {
+        flex: 0 0 auto;
+        width: 13px;
+        height: 13px;
+        color: #6e9eff;
+        opacity: 0.9;
+      }
+      .teacher-email-tag {
+        flex: 0 0 auto;
+        font-family: "Sora", sans-serif;
+        font-size: 0.6rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #6e9eff;
+        background: rgba(110, 158, 255, 0.14);
+        padding: 1px 6px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+      .teacher-email-tag-personal {
+        color: #8f8f98;
+        background: rgba(143, 143, 152, 0.16);
+      }
+      .teacher-email-text {
+        font-size: 0.78rem;
+        font-family: "JetBrains Mono", monospace;
+        color: var(--text);
+        opacity: 0.85;
+        word-break: break-all;
+      }
+      .teacher-email-copy-btn {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        margin: 0;
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted, #8f8f98);
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .teacher-email-copy-btn:hover {
+        background: rgba(110, 158, 255, 0.14);
+        color: #6e9eff;
+      }
+      .teacher-email-copy-btn.copied {
+        color: #3ecf8e;
+      }
+      .teacher-email-copy-icon {
+        width: 13px;
+        height: 13px;
+        pointer-events: none;
+      }
+      html[data-theme="light"] .teacher-email-tag-personal {
+        color: #6b6b70;
+        background: rgba(107, 107, 112, 0.12);
+      }
       .consulta-intermedio-box {
         margin: 14px 0;
         padding: 12px 14px;
@@ -103,6 +191,294 @@
         font-size: 0.78rem;
         opacity: 0.75;
         white-space: nowrap;
+      }
+
+      .resumen-trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--card-bg);
+        color: var(--text);
+        font-family: "Sora", sans-serif;
+        font-weight: 600;
+        font-size: 0.88rem;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+      }
+      .resumen-trigger:hover {
+        border-color: #6e9eff;
+        background: rgba(110, 158, 255, 0.1);
+      }
+      .resumen-trigger:active {
+        transform: scale(0.97);
+      }
+      @media (max-width: 720px) {
+        .resumen-trigger span:not(.icon):not(.cal-count-badge) {
+          display: none;
+        }
+        .resumen-trigger {
+          padding: 8px 10px;
+        }
+      }
+
+      .resumen-card {
+        width: min(1300px, 96vw) !important;
+        max-width: 96vw !important;
+        height: 90vh !important;
+        max-height: 90vh !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+        padding: 0 !important;
+      }
+      .resumen-card .calendar-modal-head {
+        flex: 0 0 auto;
+        padding: 18px 20px 12px;
+        margin: 0;
+      }
+      .resumen-card .empty-hint {
+        padding: 0 20px;
+      }
+      .resumen-card .resumen-body-scroll {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 20px;
+        min-height: 0;
+      }
+      .resumen-card .modal-actions {
+        flex: 0 0 auto;
+        padding: 12px 20px 18px;
+        margin: 0;
+        border-top: 1px solid var(--line);
+      }
+      .resumen-table-wrap {
+        overflow-x: auto;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+      }
+      table.resumen-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: "Sora", sans-serif;
+        font-size: 0.85rem;
+        min-width: 920px;
+      }
+      table.resumen-table thead th {
+        text-align: left;
+        padding: 12px 14px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--muted, #8f8f98);
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+        position: sticky;
+        top: 0;
+        background: var(--card-bg);
+        z-index: 1;
+      }
+      table.resumen-table tbody tr {
+        border-bottom: 1px solid var(--line);
+      }
+      table.resumen-table tbody tr:last-child {
+        border-bottom: none;
+      }
+      table.resumen-table tbody tr:nth-child(even) {
+        background: rgba(110, 158, 255, 0.04);
+      }
+      table.resumen-table td {
+        padding: 12px 14px;
+        vertical-align: top;
+      }
+      .resumen-subject-cell {
+        font-weight: 700;
+        color: var(--text);
+      }
+      .resumen-com-cell {
+        font-size: 0.78rem;
+        opacity: 0.75;
+        margin-top: 2px;
+      }
+      .resumen-pill {
+        display: inline-block;
+        padding: 2px 9px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        background: rgba(110, 158, 255, 0.14);
+        color: #6e9eff;
+        white-space: nowrap;
+      }
+      .resumen-pending {
+        opacity: 0.6;
+        font-style: italic;
+      }
+      .resumen-remove-btn {
+        border: none;
+        background: transparent;
+        color: var(--muted, #8f8f98);
+        cursor: pointer;
+        font-size: 0.75rem;
+        padding: 4px 8px;
+        border-radius: 6px;
+        white-space: nowrap;
+      }
+      .resumen-remove-btn:hover {
+        background: rgba(255, 77, 109, 0.14);
+        color: #ff4d6d;
+      }
+      .resumen-add-btn {
+        flex: 0 0 auto;
+        width: 30px;
+        height: 30px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: #6e9eff;
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+      }
+      .resumen-add-btn:hover {
+        border-color: #6e9eff;
+        background: rgba(110, 158, 255, 0.14);
+      }
+      .resumen-add-btn:active {
+        transform: scale(0.92);
+      }
+      .resumen-add-btn.added {
+        color: #3ecf8e;
+        border-color: #3ecf8e;
+        background: rgba(62, 207, 142, 0.12);
+        font-size: 0.9rem;
+      }
+      .resumen-add-btn.added:hover {
+        background: rgba(255, 77, 109, 0.14);
+        border-color: #ff4d6d;
+        color: #ff4d6d;
+      }
+      table.resumen-table td:first-child {
+        width: 40px;
+        padding-right: 4px;
+      }
+
+      /* Vista de tarjetas para mobile */
+      .resumen-cards {
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+        padding-bottom: 4px;
+      }
+      .resumen-card-item {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: var(--card-bg);
+      }
+      .resumen-card-item-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .resumen-card-title {
+        font-weight: 700;
+        font-size: 0.92rem;
+        color: var(--text);
+      }
+      .resumen-card-sub {
+        font-size: 0.78rem;
+        opacity: 0.7;
+        margin-top: 2px;
+      }
+      .resumen-card-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px 10px;
+        font-size: 0.82rem;
+      }
+      .resumen-card-field-label {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        opacity: 0.55;
+        margin-bottom: 1px;
+      }
+      @media (max-width: 780px) {
+        .resumen-table-wrap {
+          display: none;
+        }
+        .resumen-cards {
+          display: flex;
+        }
+        .resumen-card {
+          width: 96vw !important;
+          height: 92vh !important;
+          max-height: 92vh !important;
+        }
+        .resumen-card .resumen-body-scroll {
+          padding: 0 14px;
+        }
+        .resumen-card .calendar-modal-head {
+          padding: 16px 14px 10px;
+        }
+        .resumen-card .modal-actions {
+          padding: 12px 14px 16px;
+        }
+      }
+
+      .subject-summary-btn-wrap {
+        margin: 0 0 14px;
+      }
+      .subject-summary-btn {
+        display: flex;
+        width: 100%;
+        justify-content: center;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: var(--card-bg);
+        color: var(--text);
+        font-family: "Sora", sans-serif;
+        font-weight: 600;
+        font-size: 0.88rem;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+      }
+      .subject-summary-btn:hover {
+        border-color: #6e9eff;
+        background: rgba(110, 158, 255, 0.1);
+      }
+      .subject-summary-btn:active {
+        transform: scale(0.98);
+      }
+      .subject-summary-btn .icon {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+        display: inline-block;
+        background: currentColor;
+        -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><line x1='3' y1='10' x2='21' y2='10'/><line x1='8' y1='14' x2='16' y2='14'/></svg>") center / contain no-repeat;
+        mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='16' rx='2'/><line x1='3' y1='10' x2='21' y2='10'/><line x1='8' y1='14' x2='16' y2='14'/></svg>") center / contain no-repeat;
+      }
+      @media (max-width: 480px) {
+        .subject-summary-btn {
+          font-size: 0.8rem;
+          padding: 10px 8px;
+        }
       }
 
       .pdf-preview-status {
@@ -194,16 +570,60 @@
         min-width: 160px;
       }
 
+      /* Ícono de lupa dentro de los inputs de búsqueda */
+      .search-input-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .search-input-icon {
+        position: absolute;
+        left: 12px;
+        width: 16px;
+        height: 16px;
+        pointer-events: none;
+        color: var(--muted, #8f8f98);
+        opacity: 0.8;
+      }
+      .search-input-wrap .search-input {
+        width: 100%;
+        padding: 10px 12px 10px 36px;
+        font-size: 0.85rem;
+        box-sizing: border-box;
+      }
+
+      /* Progreso de carga del catálogo de materias */
+      .catalog-loading-hint {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 24px 16px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.85rem;
+      }
+      .catalog-progress-bar {
+        width: 100%;
+        max-width: 260px;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--line);
+        overflow: hidden;
+      }
+      .catalog-progress-fill {
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #6e9eff, #00e5ff);
+        transition: width 0.25s ease;
+      }
+
       /* Buscador de profesor dentro de una materia abierta */
       .subject-teacher-search-box {
-        margin: 0 0 14px;
+        margin: 0 0 22px;
         padding: 10px 12px;
         border-radius: 10px;
         background: var(--card-bg);
         border: 1px solid var(--line);
-      }
-      .subject-teacher-search-box .search-input {
-        width: 100%;
       }
       .subject-teacher-search-hint {
         font-size: 0.78rem;
@@ -476,14 +896,25 @@
             </button>
           </div>
 
-          <input
-            id="searchInput"
-            class="search-input"
-            type="search"
-            placeholder="Buscar materia o código..."
-          />
-          <div id="materiaList" class="materia-list">
-            <div class="empty-hint">Cargando catálogo...</div>
+          <div class="search-input-wrap">
+            <svg class="search-input-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <input
+              id="searchInput"
+              class="search-input"
+              type="search"
+              placeholder="Buscar materia por nombre o código..."
+            />
+          </div>
+          <div id="materiaList" class="materia-list" data-loading-catalog="1">
+            <div class="empty-hint catalog-loading-hint">
+              <div>Cargando catálogo... 0%</div>
+              <div class="catalog-progress-bar">
+                <div class="catalog-progress-fill" style="width:0%"></div>
+              </div>
+            </div>
           </div>
           <button
             id="scrollTopBtn"
@@ -528,6 +959,13 @@
           <div class="calendar-modal-head-actions">
             <button
               class="btn-modal confirm"
+              id="calendarSummaryBtn"
+              title="Ver tu horario en formato tabla"
+            >
+              Ver como tabla
+            </button>
+            <button
+              class="btn-modal confirm"
               id="calendarPdfBtn"
               title="Descargar el horario en PDF"
             >
@@ -565,6 +1003,90 @@
         <div id="calendarList" class="calendar-list"></div>
         <div class="modal-actions">
           <button class="btn-modal cancel" id="calendarCloseBtn">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="resumenModal" class="modal-overlay">
+      <div class="modal-card resumen-card">
+        <div class="calendar-modal-head">
+          <h3>Resumen de tu horario</h3>
+          <div class="calendar-modal-head-actions">
+            <button
+              class="btn-modal cancel"
+              id="resumenClearBtn"
+              title="Quitar todas las materias del horario"
+            >
+              Vaciar horario
+            </button>
+          </div>
+        </div>
+
+        <div class="resumen-body-scroll">
+          <div id="resumenEmptyHint" class="empty-hint" style="display: none">
+            Todavía no agregaste ninguna materia. Buscá una comisión y tocá
+            "Agregar al planificador".
+          </div>
+
+          <div class="resumen-table-wrap">
+            <table class="resumen-table">
+              <thead>
+                <tr>
+                  <th>Comisión</th>
+                  <th>Día y Horario</th>
+                  <th>Cant.Horas</th>
+                  <th>Modalidad</th>
+                  <th>Docente</th>
+                  <th>Aula</th>
+                  <th>Edificio</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="resumenTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="resumen-cards" id="resumenCards"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-modal cancel" id="resumenCloseBtn">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="subjectSummaryModal" class="modal-overlay">
+      <div class="modal-card resumen-card">
+        <div class="calendar-modal-head">
+          <h3 id="subjectSummaryTitle">Resumen de la materia</h3>
+        </div>
+
+        <div class="resumen-body-scroll">
+          <div class="resumen-table-wrap">
+            <table class="resumen-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Comisión</th>
+                  <th>Día y Horario</th>
+                  <th>Cant.Horas</th>
+                  <th>Modalidad</th>
+                  <th>Periodicidad</th>
+                  <th>Docente</th>
+                  <th>Aula</th>
+                  <th>Edificio</th>
+                  <th>Observaciones</th>
+                </tr>
+              </thead>
+              <tbody id="subjectSummaryTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="resumen-cards" id="subjectSummaryCards"></div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-modal cancel" id="subjectSummaryCloseBtn">Cerrar</button>
         </div>
       </div>
     </div>
@@ -625,7 +1147,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
-      const BASE_URL = "";
+      const BASE_URL = "http://127.0.0.1:8000";
 
       /* ---------------- CATÁLOGO DE INSTITUTOS Y CARRERAS ---------------- */
       // Estructura declarada explícitamente a partir de los datos provistos.
@@ -696,6 +1218,175 @@
 
       let allSubjects = [];
       let selectedSubject = null;
+
+      // ---------------- Info extra de docentes (info.json en la raíz) ----------------
+      // Mapa teacherId -> { dni, email, institutionalEmail, ... }, se usa para
+      // mostrar el correo debajo de cada profe SIN mostrar los institucionales
+      // autogenerados (formato D<dni>@unaj.edu.ar).
+      let teacherInfoMap = new Map();
+      // Mapa por nombre normalizado (sin tildes, minúsculas, espacios
+      // colapsados). La API de /api/horarios no siempre trae un id de
+      // docente utilizable, así que matcheamos por teacherFullName como
+      // método principal.
+      let teacherInfoByName = new Map();
+      let teacherInfoLoaded = false;
+
+      // Normaliza un nombre de docente para poder compararlo entre
+      // info.json y lo que devuelve /api/horarios, aunque tengan
+      // pequeñas diferencias de espacios, mayúsculas o tildes.
+      function normalizeTeacherName(name) {
+        return String(name || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "") // saca tildes
+          .toLowerCase()
+          .replace(/\s+/g, " ")
+          .replace(/\s*,\s*/g, ", ") // uniforma espacios alrededor de la coma
+          .trim();
+      }
+
+      async function loadTeacherInfo() {
+        try {
+          const res = await fetch("info.json");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : data.items || [];
+          list.forEach((t) => {
+            if (!t) return;
+            if (t.teacherId != null) {
+              teacherInfoMap.set(String(t.teacherId), t);
+            }
+            if (t.teacherFullName) {
+              const key = normalizeTeacherName(t.teacherFullName);
+              // Si hay dos docentes con el mismo nombre normalizado,
+              // nos quedamos con el primero (caso raro, pero mejor no
+              // pisar datos silenciosamente).
+              if (key && !teacherInfoByName.has(key)) {
+                teacherInfoByName.set(key, t);
+              }
+            }
+          });
+        } catch (err) {
+          // Si no está disponible info.json, seguimos sin mostrar correos.
+          teacherInfoMap = new Map();
+          teacherInfoByName = new Map();
+        } finally {
+          teacherInfoLoaded = true;
+        }
+      }
+      // Guardamos la promesa para poder esperarla (await) antes de renderizar
+      // tarjetas de docentes, y así evitar que la UI se dibuje sin correos
+      // por una condición de carrera con este fetch.
+      const teacherInfoReady = loadTeacherInfo();
+
+      // Devuelve los correos a mostrar para un docente ({ institutional, personal }),
+      // o null en cada uno si no hay. Descarta el institucional cuando es el
+      // autogenerado (D<dni>@unaj.edu.ar). Si ambos correos son el mismo, no
+      // lo duplicamos. Busca primero por teacherId (si vino) y, si no
+      // encuentra nada, por nombre normalizado — /api/horarios no siempre
+      // trae un id utilizable, pero el nombre completo sí es confiable.
+      function resolveTeacherEmails(teacherId, teacherName) {
+        let record = teacherId != null ? teacherInfoMap.get(String(teacherId)) : null;
+        if (!record && teacherName) {
+          const key = normalizeTeacherName(teacherName);
+          if (key) record = teacherInfoByName.get(key);
+        }
+        if (!record) return { institutional: null, personal: null };
+
+        const dni = record.dni != null ? String(record.dni).trim() : "";
+        const autoGenerated = dni ? `d${dni}@unaj.edu.ar` : null;
+
+        let inst = record.institutionalEmail
+          ? String(record.institutionalEmail).trim()
+          : "";
+        if (inst && autoGenerated && inst.toLowerCase() === autoGenerated) {
+          inst = ""; // descartamos el institucional autogenerado
+        }
+        const personal = record.email ? String(record.email).trim() : "";
+
+        if (inst && personal && inst.toLowerCase() === personal.toLowerCase()) {
+          return { institutional: inst, personal: null };
+        }
+        return { institutional: inst || null, personal: personal || null };
+      }
+
+      const TEACHER_EMAIL_ICON_SVG =
+        '<svg class="teacher-email-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m22 6-10 7L2 6"></path></svg>';
+
+      // Ícono típico de "copiar" (dos rectángulos superpuestos).
+      const TEACHER_COPY_ICON_SVG =
+        '<svg class="teacher-email-copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+      // Ícono de tilde, se muestra brevemente después de copiar.
+      const TEACHER_COPY_CHECK_SVG =
+        '<svg class="teacher-email-copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>';
+
+      // Arma el bloque HTML con los correos de un docente (institucional y
+      // personal), cada uno con ícono de sobre, etiqueta, y botón de copiar.
+      // Devuelve "" si no hay ningún correo para mostrar.
+      function renderTeacherEmailsHtml(emails) {
+        if (!emails || (!emails.institutional && !emails.personal)) return "";
+        const rows = [];
+        if (emails.institutional) {
+          rows.push(`
+            <span class="teacher-email-item" title="Correo institucional">
+              ${TEACHER_EMAIL_ICON_SVG}
+              <span class="teacher-email-tag">UNAJ</span>
+              <span class="teacher-email-text">${escapeHtml(emails.institutional)}</span>
+              <button type="button" class="teacher-email-copy-btn" data-copy-email="${escapeHtml(emails.institutional)}" title="Copiar correo" aria-label="Copiar correo institucional">${TEACHER_COPY_ICON_SVG}</button>
+            </span>`);
+        }
+        if (emails.personal) {
+          rows.push(`
+            <span class="teacher-email-item" title="Correo personal">
+              ${TEACHER_EMAIL_ICON_SVG}
+              <span class="teacher-email-tag teacher-email-tag-personal">Personal</span>
+              <span class="teacher-email-text">${escapeHtml(emails.personal)}</span>
+              <button type="button" class="teacher-email-copy-btn" data-copy-email="${escapeHtml(emails.personal)}" title="Copiar correo" aria-label="Copiar correo personal">${TEACHER_COPY_ICON_SVG}</button>
+            </span>`);
+        }
+        return `<span class="teacher-email-list">${rows.join("")}</span>`;
+      }
+
+      // Delegación de eventos: un solo listener para todos los botones de
+      // copiar correo, sin importar cuántas tarjetas se rendericen o
+      // vuelvan a renderizar.
+      document.addEventListener("click", (e) => {
+        const btn = e.target.closest(".teacher-email-copy-btn");
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const email = btn.dataset.copyEmail || "";
+        if (!email) return;
+
+        const markCopied = () => {
+          if (btn.dataset.copyTimeout) clearTimeout(Number(btn.dataset.copyTimeout));
+          btn.classList.add("copied");
+          btn.innerHTML = TEACHER_COPY_CHECK_SVG;
+          const t = setTimeout(() => {
+            btn.classList.remove("copied");
+            btn.innerHTML = TEACHER_COPY_ICON_SVG;
+          }, 1400);
+          btn.dataset.copyTimeout = String(t);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(email).then(markCopied).catch(() => {
+            // Fallback por si el navegador bloquea la API de clipboard.
+            const ta = document.createElement("textarea");
+            ta.value = email;
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+              document.execCommand("copy");
+              markCopied();
+            } catch (err) {
+              /* no se pudo copiar, no hacemos nada más */
+            }
+            document.body.removeChild(ta);
+          });
+        }
+      });
 
       // Cache de comisiones ya consultadas por materia, usado por el
       // buscador global de "Buscar profesor" para no repetir fetches
@@ -1171,13 +1862,40 @@
         const statusText = document.getElementById("statusText");
         statusText.textContent = "Conectando...";
 
+        const total = CARRERS.length;
+        let done = 0;
+
+        function updateProgress() {
+          const materiaListEl = document.getElementById("materiaList");
+          if (!materiaListEl) return;
+          // Solo pisamos el contenido mientras siga siendo el placeholder de
+          // carga inicial (si el usuario ya está viendo la lista, no lo tocamos).
+          if (!materiaListEl.dataset.loadingCatalog) return;
+          const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+          materiaListEl.innerHTML = `
+            <div class="empty-hint catalog-loading-hint">
+              <div>Cargando catálogo... ${pct}%</div>
+              <div class="catalog-progress-bar">
+                <div class="catalog-progress-fill" style="width:${pct}%"></div>
+              </div>
+            </div>`;
+        }
+
+        const materiaListEl = document.getElementById("materiaList");
+        if (materiaListEl) materiaListEl.dataset.loadingCatalog = "1";
+        updateProgress();
+
         try {
           const responses = await Promise.all(
             CARRERS.map((c) =>
               fetch(`${BASE_URL}/api/materias/${c.id}`)
                 .then((r) => r.json())
                 .then((data) => ({ carrer: c, data }))
-                .catch(() => ({ carrer: c, data: [] })),
+                .catch(() => ({ carrer: c, data: [] }))
+                .finally(() => {
+                  done++;
+                  updateProgress();
+                }),
             ),
           );
 
@@ -1209,11 +1927,13 @@
           document.getElementById("statusDot").classList.remove("off");
           statusText.textContent = "Conectado";
           sndSuccess();
+          if (materiaListEl) delete materiaListEl.dataset.loadingCatalog;
           renderList();
         } catch (err) {
           dot.classList.add("off");
           statusText.textContent = "Error de conexión";
           sndError();
+          if (materiaListEl) delete materiaListEl.dataset.loadingCatalog;
           document.getElementById("materiaList").innerHTML =
             `<div class="error-line">No se pudo conectar con el backend (${BASE_URL}). ¿Está corriendo uvicorn?</div>`;
         }
@@ -1410,6 +2130,7 @@
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           const items = Array.isArray(data) ? data : data.items || [];
+          if (!teacherInfoLoaded) await teacherInfoReady;
           if (myToken !== subjectSelectionToken) return; // el usuario ya cambió de materia
           renderCoordinatorBanner(findCoordinator(items));
           renderComisiones(items);
@@ -2135,6 +2856,287 @@
         return { placed, totalHeight: Math.max(runningTop - GROUP_GAP, 0) };
       }
 
+      function openSubjectSummaryModal(subjectName, rows, comMap) {
+        document.getElementById("subjectSummaryTitle").textContent =
+          `Resumen — ${subjectName}`;
+        const tbody = document.getElementById("subjectSummaryTableBody");
+        const cardsWrap = document.getElementById("subjectSummaryCards");
+
+        function pendingSpan(val) {
+          if (!val || val === PENDIENTE_ASIGNAR) {
+            return `<span class="resumen-pending">Pendiente de asignar</span>`;
+          }
+          return escapeHtml(val);
+        }
+        function plain(val) {
+          return val
+            ? escapeHtml(val)
+            : `<span class="resumen-pending">Sin Observaciones</span>`;
+        }
+        function addBtnHtml(r) {
+          const inCal = isComisionInCalendar(selectedSubject, comMap[r.comKey]);
+          return `<button
+              class="resumen-add-btn${inCal ? " added" : ""}"
+              data-com-key="${escapeHtml(r.comKey)}"
+              title="${inCal ? "Quitar del planificador" : "Agregar al planificador"}"
+            >${inCal ? "✓" : "+"}</button>`;
+        }
+
+        function renderRows() {
+          tbody.innerHTML = rows
+            .map(
+              (r) => `
+                <tr>
+                  <td>${addBtnHtml(r)}</td>
+                  <td><div class="resumen-subject-cell">${escapeHtml(r.comision)}</div></td>
+                  <td>${escapeHtml(r.dia)}${r.horario ? " " + escapeHtml(r.horario) : ""}</td>
+                  <td>${r.horas ? escapeHtml(r.horas) : "—"}</td>
+                  <td>${r.modalidad ? `<span class="resumen-pill">${escapeHtml(r.modalidad)}</span>` : "—"}</td>
+                  <td>${escapeHtml(r.periodicidad || "—")}</td>
+                  <td>${escapeHtml(r.docente || "—")}</td>
+                  <td>${pendingSpan(r.aula)}</td>
+                  <td>${pendingSpan(r.edificio)}</td>
+                  <td>${plain(r.observaciones)}</td>
+                </tr>
+              `,
+            )
+            .join("");
+
+          cardsWrap.innerHTML = rows
+            .map(
+              (r) => `
+                <div class="resumen-card-item">
+                  <div class="resumen-card-item-head">
+                    <div>
+                      <div class="resumen-card-title">${escapeHtml(r.comision)}</div>
+                    </div>
+                    ${addBtnHtml(r)}
+                  </div>
+                  <div class="resumen-card-grid">
+                    <div>
+                      <div class="resumen-card-field-label">Día y horario</div>
+                      <div>${escapeHtml(r.dia)}${r.horario ? " " + escapeHtml(r.horario) : "—"}</div>
+                    </div>
+                    <div>
+                      <div class="resumen-card-field-label">Cant. horas</div>
+                      <div>${r.horas ? escapeHtml(r.horas) : "—"}</div>
+                    </div>
+                    <div>
+                      <div class="resumen-card-field-label">Modalidad</div>
+                      <div>${r.modalidad ? `<span class="resumen-pill">${escapeHtml(r.modalidad)}</span>` : "—"}</div>
+                    </div>
+                    <div>
+                      <div class="resumen-card-field-label">Periodicidad</div>
+                      <div>${escapeHtml(r.periodicidad || "—")}</div>
+                    </div>
+                    <div>
+                      <div class="resumen-card-field-label">Docente</div>
+                      <div>${escapeHtml(r.docente || "—")}</div>
+                    </div>
+                    <div>
+                      <div class="resumen-card-field-label">Aula</div>
+                      <div>${pendingSpan(r.aula)}</div>
+                    </div>
+                    <div>
+                      <div class="resumen-card-field-label">Edificio</div>
+                      <div>${pendingSpan(r.edificio)}</div>
+                    </div>
+                    <div style="grid-column: 1 / -1;">
+                      <div class="resumen-card-field-label">Observaciones</div>
+                      <div>${plain(r.observaciones)}</div>
+                    </div>
+                  </div>
+                </div>
+              `,
+            )
+            .join("");
+
+          [...tbody.querySelectorAll("[data-com-key]"), ...cardsWrap.querySelectorAll("[data-com-key]")].forEach(
+            (btn) => {
+              btn.addEventListener("click", () => {
+                const com = comMap[btn.dataset.comKey];
+                if (!com) return;
+                if (isComisionInCalendar(selectedSubject, com)) {
+                  removeFromCalendar(comisionKey(selectedSubject, com));
+                } else {
+                  addToCalendar(selectedSubject, com);
+                }
+                if (typeof syncCalendarButtons === "function") {
+                  syncCalendarButtons();
+                }
+                renderRows();
+              });
+            },
+          );
+        }
+
+        renderRows();
+
+        document.getElementById("subjectSummaryModal").style.display = "flex";
+        sndTick();
+      }
+
+      function renderResumenModal() {
+        const emptyHint = document.getElementById("resumenEmptyHint");
+        const tbody = document.getElementById("resumenTableBody");
+        const cardsWrap = document.getElementById("resumenCards");
+        const tableWrap = document.querySelector(".resumen-table-wrap");
+
+        const sortedItems = getSortedCalendarItems();
+
+        if (sortedItems.length === 0) {
+          emptyHint.style.display = "block";
+          tableWrap.style.display = "none";
+          cardsWrap.style.display = "none";
+          tbody.innerHTML = "";
+          cardsWrap.innerHTML = "";
+          return;
+        }
+        emptyHint.style.display = "none";
+        tableWrap.style.display = "";
+        cardsWrap.style.display = "";
+
+        // Construimos una fila por cada franja horaria (block) de cada item;
+        // si un item no tiene blocks (solo asincrónica / sin horario), igual
+        // le mostramos una fila con los datos disponibles.
+        const rows = [];
+        sortedItems.forEach((item) => {
+          const blocks = item.blocks || [];
+          if (blocks.length > 0) {
+            blocks.forEach((b) => {
+              rows.push({ item, block: b });
+            });
+          } else {
+            (item.looseDays && item.looseDays.length > 0
+              ? item.looseDays
+              : [{ dayKey: null, modalidad: "", aula: "" }]
+            ).forEach((ld) => {
+              rows.push({ item, loose: ld });
+            });
+          }
+        });
+
+        function pendingSpan(val) {
+          if (!val || val === PENDIENTE_ASIGNAR) {
+            return `<span class="resumen-pending">Pendiente de asignar</span>`;
+          }
+          return escapeHtml(val);
+        }
+
+        tbody.innerHTML = rows
+          .map(({ item, block, loose }) => {
+            const dayLabel = block
+              ? CAL_DAY_LABELS[block.dayKey] || "—"
+              : loose && loose.dayKey
+                ? CAL_DAY_LABELS[loose.dayKey] || "—"
+                : "Sin día fijo";
+            const timeLabel = block
+              ? `${formatMinutes(block.startMin)} - ${formatMinutes(block.endMin)}`
+              : "";
+            const hours = block
+              ? (((block.endMin - block.startMin) / 60).toFixed(1)).replace(
+                  /\.0$/,
+                  "",
+                ) + " hs"
+              : "—";
+            const modalidad = (block ? block.modalidad : loose && loose.modalidad) || "—";
+            const aula = block ? block.aula : loose && loose.aula;
+            const edificio = block ? block.edificio : "";
+
+            return `
+              <tr>
+                <td>
+                  <div class="resumen-subject-cell">${escapeHtml(item.subjectName)}</div>
+                  <div class="resumen-com-cell">${escapeHtml(item.comisionName)}</div>
+                </td>
+                <td>${escapeHtml(dayLabel)}${timeLabel ? " " + escapeHtml(timeLabel) : ""}</td>
+                <td>${escapeHtml(hours)}</td>
+                <td><span class="resumen-pill">${escapeHtml(modalidad)}</span></td>
+                <td>${escapeHtml(item.teacherName || "—")}</td>
+                <td>${pendingSpan(aula)}</td>
+                <td>${pendingSpan(edificio)}</td>
+                <td><button class="resumen-remove-btn" data-remove-key="${escapeHtml(item.key)}">Quitar</button></td>
+              </tr>
+            `;
+          })
+          .join("");
+
+        cardsWrap.innerHTML = rows
+          .map(({ item, block, loose }) => {
+            const dayLabel = block
+              ? CAL_DAY_LABELS[block.dayKey] || "—"
+              : loose && loose.dayKey
+                ? CAL_DAY_LABELS[loose.dayKey] || "—"
+                : "Sin día fijo";
+            const timeLabel = block
+              ? `${formatMinutes(block.startMin)} - ${formatMinutes(block.endMin)}`
+              : "";
+            const hours = block
+              ? (((block.endMin - block.startMin) / 60).toFixed(1)).replace(
+                  /\.0$/,
+                  "",
+                ) + " hs"
+              : "—";
+            const modalidad = (block ? block.modalidad : loose && loose.modalidad) || "—";
+            const aula = block ? block.aula : loose && loose.aula;
+            const edificio = block ? block.edificio : "";
+
+            return `
+              <div class="resumen-card-item">
+                <div class="resumen-card-item-head">
+                  <div>
+                    <div class="resumen-card-title">${escapeHtml(item.subjectName)}</div>
+                    <div class="resumen-card-sub">${escapeHtml(item.comisionName)}</div>
+                  </div>
+                  <button class="resumen-remove-btn" data-remove-key="${escapeHtml(item.key)}">Quitar</button>
+                </div>
+                <div class="resumen-card-grid">
+                  <div>
+                    <div class="resumen-card-field-label">Día y horario</div>
+                    <div>${escapeHtml(dayLabel)}${timeLabel ? " " + escapeHtml(timeLabel) : ""}</div>
+                  </div>
+                  <div>
+                    <div class="resumen-card-field-label">Cant. horas</div>
+                    <div>${escapeHtml(hours)}</div>
+                  </div>
+                  <div>
+                    <div class="resumen-card-field-label">Modalidad</div>
+                    <div><span class="resumen-pill">${escapeHtml(modalidad)}</span></div>
+                  </div>
+                  <div>
+                    <div class="resumen-card-field-label">Docente</div>
+                    <div>${escapeHtml(item.teacherName || "—")}</div>
+                  </div>
+                  <div>
+                    <div class="resumen-card-field-label">Aula</div>
+                    <div>${pendingSpan(aula)}</div>
+                  </div>
+                  <div>
+                    <div class="resumen-card-field-label">Edificio</div>
+                    <div>${pendingSpan(edificio)}</div>
+                  </div>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+
+        tbody.querySelectorAll("[data-remove-key]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            removeFromCalendar(btn.dataset.removeKey);
+            renderResumenModal();
+            if (selectedSubject) syncCalendarButtons();
+          });
+        });
+        cardsWrap.querySelectorAll("[data-remove-key]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            removeFromCalendar(btn.dataset.removeKey);
+            renderResumenModal();
+            if (selectedSubject) syncCalendarButtons();
+          });
+        });
+      }
+
       function renderCalendarModal() {
         const emptyHint = document.getElementById("calendarEmptyHint");
         const gridWrap = document.getElementById("calendarGridWrap");
@@ -2305,6 +3307,14 @@
           sndTick();
         });
       document
+        .getElementById("calendarSummaryBtn")
+        .addEventListener("click", () => {
+          document.getElementById("calendarModal").style.display = "none";
+          renderResumenModal();
+          document.getElementById("resumenModal").style.display = "flex";
+          sndTick();
+        });
+      document
         .getElementById("calendarCloseBtn")
         .addEventListener("click", () => {
           document.getElementById("calendarModal").style.display = "none";
@@ -2325,6 +3335,43 @@
           renderCalendarModal();
           updateCalCountBadge();
           if (selectedSubject) syncCalendarButtons();
+        });
+
+      document
+        .getElementById("resumenCloseBtn")
+        .addEventListener("click", () => {
+          document.getElementById("resumenModal").style.display = "none";
+        });
+      document
+        .getElementById("resumenModal")
+        .addEventListener("click", (e) => {
+          if (e.target.id === "resumenModal")
+            document.getElementById("resumenModal").style.display = "none";
+        });
+      document
+        .getElementById("resumenClearBtn")
+        .addEventListener("click", () => {
+          if (calendarItems.length === 0) return;
+          if (!confirm("¿Vaciar todo tu horario guardado?")) return;
+          calendarItems = [];
+          saveCalendar();
+          renderResumenModal();
+          updateCalCountBadge();
+          if (selectedSubject) syncCalendarButtons();
+        });
+
+      document
+        .getElementById("subjectSummaryCloseBtn")
+        .addEventListener("click", () => {
+          document.getElementById("subjectSummaryModal").style.display =
+            "none";
+        });
+      document
+        .getElementById("subjectSummaryModal")
+        .addEventListener("click", (e) => {
+          if (e.target.id === "subjectSummaryModal")
+            document.getElementById("subjectSummaryModal").style.display =
+              "none";
         });
 
       /* ---------------- PANTALLA COMPLETA (solo la grilla del horario) ---------------- */
@@ -2782,21 +3829,45 @@
 
         mainBody.innerHTML = "";
 
+        // Guardamos, por comisión, las filas de horario ya parseadas para
+        // poder armar el resumen tabular de toda la materia sin repetir
+        // el parseo que ya hace el forEach de abajo.
+        const subjectSummaryRows = [];
+        const subjectSummaryComMap = {};
+
         // Buscador de profesor dentro de la materia abierta: filtra los
         // bloques de comisión ya renderizados por nombre de docente.
         const searchBox = document.createElement("div");
         searchBox.className = "subject-teacher-search-box";
         searchBox.innerHTML = `
-          <input
-            id="subjectTeacherSearchInput"
-            class="search-input"
-            type="search"
-            autocomplete="off"
-            placeholder="Buscar profesor en esta materia..."
-          />
+          <div class="search-input-wrap">
+            <svg class="search-input-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <input
+              id="subjectTeacherSearchInput"
+              class="search-input"
+              type="search"
+              autocomplete="off"
+              placeholder="Escribí el apellido de un profesor..."
+            />
+          </div>
           <div class="subject-teacher-search-hint" id="subjectTeacherSearchHint"></div>
         `;
         mainBody.appendChild(searchBox);
+
+        if (items.length > 1) {
+          const summaryBtnWrap = document.createElement("div");
+          summaryBtnWrap.className = "subject-summary-btn-wrap";
+          summaryBtnWrap.innerHTML = `
+            <button class="subject-summary-btn" id="subjectSummaryBtn" type="button">
+              <span class="icon" id="subjectSummaryIcon"></span>
+              <span>Resumen de todas las comisiones</span>
+            </button>
+          `;
+          mainBody.appendChild(summaryBtnWrap);
+        }
 
         items.forEach((com) => {
           const nombreComision =
@@ -2808,7 +3879,7 @@
           const teachers = Array.isArray(com.teachers) ? com.teachers : [];
           const normalizedTeachers = teachers
             .map((t) => {
-              if (typeof t === "string") return { name: t, role: "" };
+              if (typeof t === "string") return { name: t, role: "", id: null };
               const name = t.teacherFullName || t.fullName || t.name || "";
               const role =
                 t.teacherRoleName ||
@@ -2816,7 +3887,8 @@
                 t.role ||
                 t.roleName ||
                 "";
-              return { name, role };
+              const id = t.teacherId != null ? t.teacherId : t.id != null ? t.id : null;
+              return { name, role, id };
             })
             .filter((t) => t.name);
 
@@ -2885,6 +3957,57 @@
             });
           });
 
+          const teacherNamesForRow = normalizedTeachers
+            .map((t) => t.name)
+            .join(", ");
+          const obsForRow = Array.from(
+            new Set(flatDayRows.map((d) => d.observations).filter(Boolean)),
+          ).join(" — ");
+          subjectSummaryComMap[comisionKey(selectedSubject, com)] = com;
+
+          if (flatDayRows.length === 0) {
+            subjectSummaryRows.push({
+              comKey: comisionKey(selectedSubject, com),
+              comision: nombreComision,
+              dia: "",
+              horario: "",
+              horas: "",
+              modalidad: "",
+              periodicidad: "",
+              docente: teacherNamesForRow,
+              aula: "",
+              edificio: "",
+              observaciones: obsForRow || "Sin días/horarios informados.",
+            });
+          } else {
+            flatDayRows.forEach((d) => {
+              let horas = "";
+              const startMin = parseTimeToMinutes(d.startHour);
+              const endMin = parseTimeToMinutes(d.endHour);
+              if (startMin !== null && endMin !== null && endMin > startMin) {
+                horas =
+                  (((endMin - startMin) / 60).toFixed(1)).replace(/\.0$/, "") +
+                  " hs";
+              }
+              subjectSummaryRows.push({
+                comKey: comisionKey(selectedSubject, com),
+                comision: nombreComision,
+                dia: d.dia || "",
+                horario:
+                  d.startHour && d.endHour
+                    ? `${d.startHour} - ${d.endHour}`
+                    : d.startHour || "",
+                horas,
+                modalidad: d.modalidad || "",
+                periodicidad: "Semanal",
+                docente: teacherNamesForRow,
+                aula: d.aula || "",
+                edificio: d.edificio || "",
+                observaciones: d.observations || obsForRow || "",
+              });
+            });
+          }
+
           const block = document.createElement("div");
           block.className = "comision-block";
           // Guardamos los nombres de todos los docentes de esta comisión
@@ -2951,9 +4074,13 @@
             card.title = isDRC(primaryTeacher.role)
               ? "Docente DRC — posiblemente a cargo de esta comisión"
               : "Profesor SE — posiblemente a cargo de esta comisión";
+            const teacherEmails = resolveTeacherEmails(primaryTeacher.id, primaryTeacher.name);
             card.innerHTML = `
-          <div class="avatar-circle">${escapeHtml(getInitial(primaryTeacher.name))}</div>
-          <span class="teacher-name-solo">${escapeHtml(primaryTeacher.name)}</span>
+          <div class="teacher-card-toprow">
+            <div class="avatar-circle">${escapeHtml(getInitial(primaryTeacher.name))}</div>
+            <span class="teacher-name-solo">${escapeHtml(primaryTeacher.name)}</span>
+          </div>
+          ${renderTeacherEmailsHtml(teacherEmails)}
         `;
             teacherCardWrap.appendChild(card);
           } else {
@@ -3013,6 +4140,17 @@
         if (subjectTeacherInput) {
           subjectTeacherInput.addEventListener("input", () => {
             filterComisionesByTeacher(subjectTeacherInput.value);
+          });
+        }
+
+        const subjectSummaryBtn = document.getElementById("subjectSummaryBtn");
+        if (subjectSummaryBtn) {
+          subjectSummaryBtn.addEventListener("click", () => {
+            openSubjectSummaryModal(
+              (selectedSubject && selectedSubject.name) || "Materia",
+              subjectSummaryRows,
+              subjectSummaryComMap,
+            );
           });
         }
       }
@@ -3116,7 +4254,7 @@
         const teachers = Array.isArray(com.teachers) ? com.teachers : [];
         return teachers
           .map((t) => {
-            if (typeof t === "string") return { name: t, role: "" };
+            if (typeof t === "string") return { name: t, role: "", id: null };
             const name = t.teacherFullName || t.fullName || t.name || "";
             const role =
               t.teacherRoleName ||
@@ -3124,7 +4262,8 @@
               t.role ||
               t.roleName ||
               "";
-            return { name, role };
+            const id = t.teacherId != null ? t.teacherId : t.id != null ? t.id : null;
+            return { name, role, id };
           })
           .filter((t) => t.name);
       }
@@ -3171,6 +4310,9 @@
         statusEl.style.display = "block";
         statusEl.textContent = "Buscando en todas las materias, puede tardar unos segundos...";
 
+        if (!teacherInfoLoaded) await teacherInfoReady;
+        if (myToken !== teacherSearchToken) return;
+
         // Concurrencia moderada: suficiente para acelerar bastante la
         // búsqueda sin bombardear el backend de golpe con las ~500+
         // materias del catálogo completo.
@@ -3198,6 +4340,7 @@
                 if (!matchesByTeacher.has(normName)) {
                   matchesByTeacher.set(normName, {
                     name: t.name,
+                    id: t.id,
                     subjects: new Map(),
                   });
                 }
@@ -3272,9 +4415,11 @@
                   </div>`;
               })
               .join("");
+            const teacherEmails = resolveTeacherEmails(teacher.id, teacher.name);
             return `
               <div class="teacher-search-result-item">
                 <div class="teacher-search-result-name">${escapeHtml(teacher.name)}</div>
+                ${renderTeacherEmailsHtml(teacherEmails)}
                 ${subjectRows}
               </div>`;
           })
@@ -3428,7 +4573,7 @@
       const fbApp = initializeApp(firebaseConfig);
       const db = getDatabase(fbApp);
 
-      const BASE_URL = "";
+      const BASE_URL = "http://127.0.0.1:8000";
 
       let currentTeacherId = null;
       let currentCommentsRef = null;

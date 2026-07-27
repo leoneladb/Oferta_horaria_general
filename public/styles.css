@@ -47,6 +47,11 @@ html[data-theme="light"] .brand h1 {
 html[data-theme="light"] .combo-dropdown{
   background: #fff;
 }
+html[data-theme="light"] {
+  #commentsInput{
+    background: #fff ;
+    }
+}
 
 * { box-sizing: border-box; }
 
@@ -1058,7 +1063,7 @@ footer {
 
 #commentsInput {
   width: 100%;
-  background: #fff;
+  background: #0D1525;
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 8px;
