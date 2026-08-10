@@ -460,7 +460,7 @@ def _dedupe_key(item: dict) -> str:
     return f"nc:{code}|{name}"
 
 
-async def _fetch_materias_live(carrer_id: str) -> Optional[list]:
+async def _fetch_materias_live(carrer_id: str, deadline: Optional[float] = None) -> Optional[list]:
     """
     Intenta conseguir las materias EN VIVO desde la UNAJ, probando en orden:
     paginación por offset -> siusync directo -> variantes RSC/HTML.
@@ -492,6 +492,20 @@ async def _fetch_materias_live(carrer_id: str) -> Optional[list]:
 
     async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
         for _ in range(MAX_PAGES):
+            # Chequeo de deadline DENTRO del loop, en vez de envolver toda la
+            # función en un asyncio.wait_for() desde afuera: si el deadline
+            # externo cancela la corrutina a mitad de un await, se pierde
+            # TODO lo acumulado en all_items (una cancelación no permite
+            # devolver nada). Cortando acá adentro, en cambio, lo tratamos
+            # igual que un corte por error: pagination_complete queda False
+            # y el resultado parcial se descarta explícitamente más abajo,
+            # sin destruir progreso a ciegas.
+            if deadline is not None and time.monotonic() >= deadline:
+                print(f"  ⚠ Se agotó el presupuesto de tiempo en offset={offset} "
+                      f"con {len(all_items)} materias acumuladas: se corta la "
+                      f"paginación (no se trata como completa).")
+                break
+
             items_page = None
             last_err = None
 
@@ -685,18 +699,26 @@ async def get_materias(carrer_id: str):
     # Deadline total del request: TODO lo que sigue (intento en vivo +
     # lectura de respaldo) tiene que entrar acá, para no depender de que
     # cada paso individual "adivine" bien su propio timeout.
+    #
+    # OJO: antes esto se aplicaba con asyncio.wait_for() envolviendo TODA
+    # _fetch_materias_live desde afuera. El problema: si la paginación
+    # tardaba más que el presupuesto, wait_for CANCELABA la corrutina a
+    # mitad de un await, y esa cancelación destruye todo lo acumulado en
+    # all_items sin poder devolver nada (ni siquiera parcial). Eso causaba
+    # el bug de "a veces 500 materias, a veces 100": cuando la red iba un
+    # poco más lenta de lo normal, se perdía TODO el progreso de golpe y
+    # cafa directo al respaldo (que podía tener un conteo viejo/menor).
+    #
+    # Ahora el deadline se pasa como parámetro y se chequea DENTRO del loop
+    # de paginación, así el corte por tiempo se trata igual que un corte
+    # por error: se marca como incompleto y se descarta explícitamente,
+    # en vez de perderse por una cancelación externa.
     deadline = time.monotonic() + TOTAL_REQUEST_BUDGET_SECONDS
 
     try:
-        result = await asyncio.wait_for(
-            _fetch_materias_live(carrer_id),
-            timeout=min(LIVE_FETCH_BUDGET_SECONDS, _remaining_budget(
-                deadline, minimum=0.5, maximum=LIVE_FETCH_BUDGET_SECONDS)),
-        )
+        result = await _fetch_materias_live(carrer_id, deadline=deadline)
     except Exception as err:
-        kind = "timeout" if isinstance(
-            err, asyncio.TimeoutError) else "error"
-        print(f"  ⚠ {kind} trayendo materias en vivo ({err}), "
+        print(f"  ⚠ error trayendo materias en vivo ({err}), "
               f"se pasa directo al respaldo.")
         result = None
 
