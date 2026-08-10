@@ -485,49 +485,68 @@ async def _fetch_materias_live(carrer_id: str) -> Optional[list]:
     seen_keys: set[str] = set()
     PAGE_SIZE = 10
     MAX_PAGES = 60  # tope de seguridad
+    MAX_PAGE_RETRIES = 2  # reintentos por página antes de dar la paginación por rota
     offset = 0
     period = await get_current_period()
+    pagination_complete = False  # True solo si llegamos al final de forma "limpia"
 
     async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
         for _ in range(MAX_PAGES):
-            try:
-                resp = await client.get(
-                    "https://oferta-academica.espacios.unaj.edu.ar/",
-                    params={
-                        "academicPeriodId": period,
-                        "limit": PAGE_SIZE,
-                        "sortField": "name",
-                        "sortDirection": "asc",
-                        "carrerId": carrer_id,
-                        "offset": offset,
-                    },
-                    headers={
-                        "Accept": "text/x-component",
-                        "RSC": "1",
-                        "User-Agent": "Mozilla/5.0",
-                    },
-                )
-                resp.raise_for_status()
-                raw = resp.text or ""
-            except Exception as err:
-                print(f"  ⚠ Error pidiendo offset={offset}: {err}")
-                break
+            items_page = None
+            last_err = None
 
-            m = re.search(r'"items"\s*:\s*(\[[\s\S]*?\])\s*[,}]', raw)
-            if not m:
-                print(
-                    f"  → offset={offset}: no se encontró \"items\" en la respuesta.")
-                break
+            # Reintentamos la MISMA página unas pocas veces antes de rendirnos:
+            # un timeout o 5xx puntual de la UNAJ a mitad de la paginación no
+            # debería hacernos cortar con un resultado parcial (eso es lo que
+            # causaba el bug de "a veces 500 materias, a veces 100": una
+            # página que fallaba a mitad de camino se guardaba como si fuera
+            # el listado completo, pisando el respaldo bueno).
+            for attempt in range(MAX_PAGE_RETRIES + 1):
+                try:
+                    resp = await client.get(
+                        "https://oferta-academica.espacios.unaj.edu.ar/",
+                        params={
+                            "academicPeriodId": period,
+                            "limit": PAGE_SIZE,
+                            "sortField": "name",
+                            "sortDirection": "asc",
+                            "carrerId": carrer_id,
+                            "offset": offset,
+                        },
+                        headers={
+                            "Accept": "text/x-component",
+                            "RSC": "1",
+                            "User-Agent": "Mozilla/5.0",
+                        },
+                    )
+                    resp.raise_for_status()
+                    raw = resp.text or ""
 
-            try:
-                items_page = json.loads(m.group(1))
-            except Exception as e:
-                print(f"  ⚠ No se pudo parsear items en offset={offset}: {e}")
+                    m = re.search(r'"items"\s*:\s*(\[[\s\S]*?\])\s*[,}]', raw)
+                    if not m:
+                        print(
+                            f"  → offset={offset}: no se encontró \"items\" en la respuesta.")
+                        items_page = []
+                        break
+
+                    items_page = json.loads(m.group(1))
+                    last_err = None
+                    break
+                except Exception as err:
+                    last_err = err
+                    print(f"  ⚠ Error pidiendo offset={offset} "
+                          f"(intento {attempt + 1}/{MAX_PAGE_RETRIES + 1}): {err}")
+
+            if last_err is not None:
+                # Se agotaron los reintentos para esta página: cortamos, pero
+                # marcamos que fue por ERROR, no porque se acabaron los datos.
+                # pagination_complete queda en False.
                 break
 
             if not isinstance(items_page, list) or len(items_page) == 0:
                 print(
                     f"  → offset={offset}: página vacía, fin de la paginación.")
+                pagination_complete = True
                 break
 
             new_count = 0
@@ -542,16 +561,27 @@ async def _fetch_materias_live(carrer_id: str) -> Optional[list]:
                   f"{new_count} nuevos, total acumulado {len(all_items)}")
 
             if len(items_page) < PAGE_SIZE or new_count == 0:
+                pagination_complete = True
                 break
 
             offset += PAGE_SIZE
+        else:
+            # Se agotó MAX_PAGES sin llegar a una página corta/vacía: no
+            # sabemos con certeza que sea el final real, así que no lo
+            # tratamos como completo.
+            pagination_complete = False
 
-    if len(all_items) > 0:
+    if pagination_complete and len(all_items) > 0:
         print(
             f"  ✓✓ TOTAL FINAL: {len(all_items)} materias para carrera {carrer_id}")
         return all_items
 
-    print("  ⚠ Paginación por offset no devolvió nada. Probando siusync directo...")
+    if not pagination_complete and len(all_items) > 0:
+        print(f"  ⚠ Paginación cortada por error en offset={offset} con "
+              f"{len(all_items)} materias parciales acumuladas: se descartan "
+              f"para no pisar un respaldo mejor con datos incompletos.")
+
+    print("  ⚠ Paginación por offset no devolvió nada usable. Probando siusync directo...")
 
     # 2) FALLBACK: API oficial siusync (comportamiento original, por si acaso)
     async with httpx.AsyncClient(timeout=5.0) as client:
